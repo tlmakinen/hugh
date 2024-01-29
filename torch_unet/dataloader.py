@@ -8,6 +8,9 @@ from torch.utils.data.sampler import Sampler
 import os.path as osp
 import os
 
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+
 class H5Dataset(Dataset):
     def __init__(self, cosmo_h5_file_paths, 
                  gal_h5_file_paths, 
