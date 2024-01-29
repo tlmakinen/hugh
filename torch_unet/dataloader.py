@@ -16,11 +16,27 @@ class H5Dataset(Dataset):
                  gal_h5_file_paths, 
                  use_cache=False,
                  loadcache=False,
-                 root="/data101/makinen/hirax_sims/dataloader/"):
+                 root="/data101/makinen/hirax_sims/dataloader/",
+                 num_cosmo=-1,
+                 gal_mask=1024
+                 ):
+        """_summary_
+
+        Args:
+            cosmo_h5_file_paths (list): paths to cosmo signal files
+            gal_h5_file_paths (list): paths to galaxy signal files
+            use_cache (bool, optional): whether to use stored in-memory sims. Defaults to False.
+            loadcache (bool, optional): whether to load cache from a disk. Defaults to False.
+            root (str, optional): cache root directory. Defaults to "/data101/makinen/hirax_sims/dataloader/".
+            num_cosmo (int, optional): number of cosmology simulations to load (from cache). Defaults to -1.
+            gal_mask (int, optional): index of galactic plane foreground to remove from. Defaults to 1024.
+        """
         
         self.cosmo_h5_file_paths = cosmo_h5_file_paths
         self.gal_h5_file_paths = gal_h5_file_paths
         self.use_cache = use_cache
+        self.num_cosmo = num_cosmo
+        self.gal_mask = gal_mask
 
         self.cosmo_samples = []
         self.gal_samples = []
@@ -110,8 +126,8 @@ class H5Dataset(Dataset):
         torch.save(torch.stack(self.cosmo_cache), self.root + "cosmo_cache.pt")
         
     def load_cache(self):
-        self.gal_cache = torch.load(self.root + "gal_cache.pt")
-        self.cosmo_cache = torch.load(self.root + "cosmo_cache.pt")
+        self.gal_cache = torch.load(self.root + "gal_cache.pt")[..., :self.gal_mask]
+        self.cosmo_cache = torch.load(self.root + "cosmo_cache.pt")[..., :self.gal_mask]
         self.use_cache = True
     
 
