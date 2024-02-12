@@ -72,7 +72,7 @@ class H5Dataset(Dataset):
 
     # the length of the dataset is determined by the length of the cosmo map dataset
     def __len__(self):
-        return len(self.cosmo_samples)
+        return len(self.cosmo_samples[:self.num_cosmo])
 
     # this method returns (x,y) = (cosmo + galaxy, cosmo) training pairs
     # here idx indexes the cosmology simulations (foregrounds will be random)
@@ -119,15 +119,15 @@ class H5Dataset(Dataset):
         self.use_cache = use_cache
         
     
-    def save_cache(self):
+    def save_cache(self, extension=""):
         if not osp.exists(self.root):
             os.makedirs(self.root)
-        torch.save(torch.stack(self.gal_cache), self.root + "gal_cache.pt")
-        torch.save(torch.stack(self.cosmo_cache), self.root + "cosmo_cache.pt")
+        torch.save(torch.stack(self.gal_cache), self.root + "gal_cache" + extension + ".pt")
+        torch.save(torch.stack(self.cosmo_cache), self.root + "cosmo_cache" + extension + ".pt")
         
-    def load_cache(self):
-        self.gal_cache = torch.load(self.root + "gal_cache.pt")[..., :self.gal_mask]
-        self.cosmo_cache = torch.load(self.root + "cosmo_cache.pt")[..., :self.gal_mask]
+    def load_cache(self, extension="", num_cosmo=-1, num_gal=-1):
+        self.gal_cache = torch.load(self.root + "gal_cache" + extension + ".pt")[:num_gal, ..., :self.gal_mask]
+        self.cosmo_cache = torch.load(self.root + "cosmo_cache" + extension + ".pt")[:num_cosmo, ..., :self.gal_mask]
         self.use_cache = True
     
 
