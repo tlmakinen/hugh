@@ -12,6 +12,9 @@ import os
 
 import cloudpickle as pickle
 
+from dataloader import *
+from nets import *
+
 # --------------------------------------------------------------------------------------
 
 def save_obj(obj, name):
@@ -23,8 +26,10 @@ def load_obj(name):
         return pickle.load(f)
     
 
-from dataloader import *
-from nets import *
+
+
+# --------------------------------------------------------------------------------------
+# custom log-mse loss
 
 class logMSELoss(nn.Module):
     def __init__(self):
@@ -36,6 +41,43 @@ class logMSELoss(nn.Module):
 
 # --------------------------------------------------------------------------------------
 
+
+
+
+
+# model stuff
+# HIDDEN_CHANNELS = configs["model_params"][model_type][model_size]["hidden_channels"]
+# NUM_LAYERS = configs["model_params"][model_type][model_size]["num_layers"]
+# MODEL_NAME = configs["model_params"][model_type][model_size]["name"]
+# TEST_BATCHING = configs["model_params"][model_type][model_size]["test_batching"]
+
+
+# # optimizer schedule
+# LEARNING_RATE = configs["training_params"]["learning_rate"]
+# EPOCHS = int(configs["training_params"]["epochs"])
+# DO_SCHEDULER = bool(int(configs["training_params"]["do_lr_scheduler"]))
+
+# # data + out directories
+# DATA_DIR = configs["training_params"]["data_dir"]
+# MODEL_DIR = configs["training_params"]["model_dir"]
+# LOAD_DIR = configs["training_params"]["load_dir"]
+
+
+# if not os.path.exists(MODEL_DIR):
+#    # Create a new directory if it does not exist
+#    os.makedirs(MODEL_DIR)
+#    print("created new directory", MODEL_DIR)
+
+# ### CONSTRUCT MODEL NAME AND OUTPUT PATH
+# MODEL_NAME += "nc_%d_nlyr_%d"%(HIDDEN_CHANNELS, NUM_LAYERS)
+# MODEL_PATH = MODEL_DIR + MODEL_NAME
+# LOAD_PATH = LOAD_DIR + MODEL_NAME
+
+
+
+# --------------------------------------------------------------------------------------
+    
+print("LOADING DATA AND INITIALISING DATALOADERS")
 
 # fix random seed
 np.random.seed(4)
@@ -78,43 +120,46 @@ np.save("/data101/makinen/hirax_sims/dataloader/gal_mask", galmask)
 
 # create train and val datasets and loaders
 
+
 train_dataset = H5Dataset(train_cosmo_files, train_gal_files, use_cache=False)
 val_dataset = H5Dataset(val_cosmo_files, val_gal_files, use_cache=False)
 
 
 train_dataloader = DataLoader(
     train_dataset,
-    batch_size=1,
-    num_workers=0,
+    batch_size=2,  # bigger batch ?
+    num_workers=5, # how high can we go ?
     shuffle=False,
+    pin_memory=True # do we need this ?
 )
 
 val_dataloader = DataLoader(
     val_dataset,
     num_workers=0,
     shuffle=False,
+    pin_memory=True
 )
 
+
+print("INITIALISING MODEL")
 
 split = 1024 // 128 # 8 chunks per sky simulation
 
 TRAIN_WITH_CACHE = False
-N_FG = 11
+N_FG = 7
 
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 2e-5
 
 max_patience = 25
 
 # create model
-
-model = UNet3d(BasicBlock, filters=8, N_FG=11).to(device)
-
+model = UNet3d(BasicBlock, filters=8).to(device)
 
 # start up the optimizer
 optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 criterion = logMSELoss()
 
-accel_path = "/data101/makinen/hirax_sims/accelerator/"
+accel_path = "/data101/makinen/hirax_sims/accelerator/residual_net/"
 accelerator = Accelerator(project_dir=accel_path)
 
 model, optimizer, train_dataloader = accelerator.prepare(
@@ -180,11 +225,12 @@ def train(epoch):
         x,y = data
         x,y = preprocess_data(x,y)
         
-        y *= model.scaling # same playing field as network
+        y *= model.scaling # 0,2 playing field
+        x *= model.scaling # 0,2 playing field
         
          # model learns residual model(x) = x + y => y_pred = model(x) - x
         preds = model(x)
-        loss = criterion(preds, y + x)
+        loss = criterion(preds, y)
         
         accelerator.backward(loss)
         optimizer.step() 
@@ -226,18 +272,28 @@ def test():
         x,y = data
         x,y = preprocess_data(x,y)
         
-        y *= model.scaling # same playing field as network
+        y *= model.scaling # 
+        x *= model.scaling
         
         # model learns residual model(x) = x + y => y_pred = model(x) - x
-        preds = model(x).cpu() - x.cpu()
+        preds = model(x).cpu() #- x.cpu()
         
-        plt.subplot(121)
-        plt.imshow(y[0, 0, 0, :, :].cpu().detach().numpy())
+        plt.subplot(131)
+        plt.title("truth")
+        plt.imshow(y[0, 0, 0, :, :])
         plt.colorbar()
 
-        plt.subplot(122)
-        plt.imshow(preds[0, 0, 0, :, :].detach().numpy())
+        plt.subplot(132)
+        plt.title("network prediction")
+        plt.imshow(preds[0, 0, 0, :, :])
         plt.colorbar()
+        
+        
+        plt.subplot(133)
+        plt.title("residual")
+        plt.imshow(((preds[0, 0, 0, :, :] - y[0, 0, 0, :, :])))
+        plt.colorbar()
+        
         plt.show()
     
     val_dataloader.dataset.cosmo_cache = []
@@ -266,21 +322,29 @@ def test():
     pbar.close()
 
 # --------------------------------------------------------------------------------------
-# run the loop
+# run the training loop
+    
+print("STARTING TRAINING LOOP")
 
-EPOCHS = 20
+EPOCHS = 30
 
 MODEL_PATH = "/data101/makinen/hirax_sims/accelerator/"
 
 gc.collect()
 
+best_loss = np.inf
+
 # training loop
 for epoch in range(1, EPOCHS + 1):
 
     loss = train(epoch)
-    
-    accelerator.save_model(model, MODEL_PATH)
-    accelerator.save_state(MODEL_PATH)
+    loss = float(loss)
+
+    if loss < best_loss:
+        
+        best_loss = loss
+        accelerator.save_model(model, MODEL_PATH)
+        accelerator.save_state(MODEL_PATH)
     
     print(f'Loss: {loss:.4f}')
 
