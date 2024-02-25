@@ -44,13 +44,23 @@ class BasicBlock(nn.Module):
 padding = (1,1,1)
 
 class UNet3d(nn.Module):
-    def __init__(self, block, filters=16, N_FG=7,
-                        scaling=1e5):
+    """3D UNet model. Heavily inpired by He et al https://github.com/siyucosmo/ML-Recon
+    """
+    
+
+    def __init__(self, block, filters=16,
+                 scaling=1e5):
+        """initialise model. inherits from BasicBlock class above.
+
+        Args:
+            block (nn.Module): Basic Convolutional block
+            filters (int, optional): Number of output filters. Defaults to 16.
+            scaling (_type_, optional): _description_. Defaults to 1e5.
+        """
+        
         super(UNet3d,self).__init__()
         fs = filters
         self.scaling = scaling
-        self.N_FG = N_FG # foreground components
-        self.pca = self._pca_layer(N_FG)
         self.layer1 = self._make_layer(block, 2, fs, blocks=2,stride=1,padding=(1,1,1))
         self.layer2 = self._make_layer(block,fs,fs*2, blocks=1,stride=2,padding=(1,1,1)) # (64,64,24)
         self.layer3 = self._make_layer(block,fs*2,fs*2,blocks=2,stride=1,padding=(1,1,1))
@@ -94,9 +104,6 @@ class UNet3d(nn.Module):
 
     def forward(self,x):
         #x_pca = self.pca(x)
-
-        x *= self.scaling # this is to get on a nice 0,1 scale
-
         #print("x_pca", x_pca.shape)
         
         x1 = self.layer1(x)
