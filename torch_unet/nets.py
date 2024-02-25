@@ -25,16 +25,17 @@ def conv3x3(inplane,outplane, stride=1,padding="same"):
                     padding_mode="circular")
 
 class BasicBlock(nn.Module):
-    def __init__(self,inplane,outplane,stride = 1, padding=0):
+    def __init__(self,inplane,outplane,stride = 1, padding=0,
+                 act=nn.SiLU):
         super(BasicBlock, self).__init__()
         self.conv1 = conv3x3(inplane,outplane,padding=padding,stride=stride)
         self.bn1 = nn.BatchNorm3d(outplane)
-        self.relu = nn.ReLU(inplace=True)
+        self.act = act(inplace=True)
 
     def forward(self,x):
         out = self.conv1(x)
         out = self.bn1(out)
-        out = self.relu(out)
+        out = self.act(out)
         return out
 
 
@@ -92,13 +93,13 @@ class UNet3d(nn.Module):
         return fn
 
     def forward(self,x):
-        x_pca = self.pca(x)
+        #x_pca = self.pca(x)
 
-        x_pca *= self.scaling # this is to get on a nice 0,1 scale
+        x *= self.scaling # this is to get on a nice 0,1 scale
 
         #print("x_pca", x_pca.shape)
         
-        x1 = self.layer1(x_pca)
+        x1 = self.layer1(x)
         #print("x1", x1.shape)
         x  = self.layer2(x1)
         #print("x", x.shape)
@@ -108,13 +109,13 @@ class UNet3d(nn.Module):
         #print("x layer 4", x.shape)
         x  = self.layer5(x)
         #print("x layer 5", x.shape)
-        x  = nn.functional.relu(self.deconv_batchnorm1((self.deconv1(x))),inplace=True)
+        x  = nn.functional.silu(self.deconv_batchnorm1((self.deconv1(x))),inplace=True)
        # print("x up 1", x.shape)
         x  = torch.cat((x,x2),dim=1)
         #print("x cat 1", x.shape)
         x  = self.layer6(x)
         #print("x layer 6", x.shape)
-        x  = nn.functional.relu(self.deconv_batchnorm2((self.deconv2(x))),inplace=True)
+        x  = nn.functional.silu(self.deconv_batchnorm2((self.deconv2(x))),inplace=True)
         #print("x up 2", x.shape)
         
         x  = torch.cat((x[:, :, :, :], x1[:, :, :, :]),dim=1)
@@ -123,4 +124,4 @@ class UNet3d(nn.Module):
         x  = self.layer7(x)
         x  = self.deconv4(x)
 
-        return x, x_pca
+        return x
