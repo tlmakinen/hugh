@@ -128,7 +128,7 @@ val_dataset = H5Dataset(val_cosmo_files, val_gal_files, use_cache=False)
 train_dataloader = DataLoader(
     train_dataset,
     batch_size=2,  # bigger batch ?
-    num_workers=5, # how high can we go ?
+    num_workers=2, # how high can we go ?
     shuffle=False,
     pin_memory=True # do we need this ?
 )
@@ -140,15 +140,18 @@ val_dataloader = DataLoader(
     pin_memory=True
 )
 
+# --------------------------------------------------------------------------------------
 
 print("INITIALISING MODEL")
 
 split = 1024 // 128 # 8 chunks per sky simulation
 
 TRAIN_WITH_CACHE = False
-N_FG = 7
+N_FG = 11
+ADD_NOISE = True
+NOISE_AMP = 1.5e-7
 
-LEARNING_RATE = 2e-5
+LEARNING_RATE = 5e-4
 
 max_patience = 25
 
@@ -195,6 +198,10 @@ def preprocess_data(x,y):
     # shape: (batch*split, freq, ra, baseline, Re/Im)
     x = torch.stack([x.real, x.imag], dim=-1)
     y = torch.stack([y.real, y.imag], dim=-1)
+
+    # add white noise to the signal
+    if ADD_NOISE:
+        x += torch.normal(mean=0.0, std=torch.ones(x.shape)*NOISE_AMP).to(device)
     
     # pass x to the pca
     x = PCALayer(x, N_FG=N_FG)
@@ -320,6 +327,7 @@ def test():
         pbar.update(1)
 
     pbar.close()
+    gc.collect()
 
 # --------------------------------------------------------------------------------------
 # run the training loop
@@ -332,6 +340,16 @@ MODEL_PATH = "/data101/makinen/hirax_sims/accelerator/"
 
 gc.collect()
 
+
+# training history
+
+history = {
+    "train_aucs": [],
+    "valid_aucs": [],
+    "test_aucs": [],
+    "losses": []
+}
+
 best_loss = np.inf
 
 # training loop
@@ -341,10 +359,14 @@ for epoch in range(1, EPOCHS + 1):
     loss = float(loss)
 
     if loss < best_loss:
-        
+
         best_loss = loss
         accelerator.save_model(model, MODEL_PATH)
         accelerator.save_state(MODEL_PATH)
+
+    # dump to save memory
+    gc.collect()
+    torch.cuda.empty_cache()
     
     print(f'Loss: {loss:.4f}')
 
