@@ -4,6 +4,8 @@ import numpy as np
 from pathlib import Path
 import torch
 from torch.utils import data
+from torch.utils.data.dataloader import default_collate
+
 import gc
 from accelerate import Accelerator
 
@@ -25,8 +27,6 @@ def load_obj(name):
     with open(name, 'rb') as f:
         return pickle.load(f)
     
-
-
 
 # --------------------------------------------------------------------------------------
 # custom log-mse loss
@@ -50,6 +50,8 @@ class logMSELoss(nn.Module):
 # NUM_LAYERS = configs["model_params"][model_type][model_size]["num_layers"]
 # MODEL_NAME = configs["model_params"][model_type][model_size]["name"]
 # TEST_BATCHING = configs["model_params"][model_type][model_size]["test_batching"]
+    
+NOISEAMP = 1.5e-7
 
 
 # # optimizer schedule
@@ -117,8 +119,52 @@ np.save("/data101/makinen/hirax_sims/dataloader/cosmo_mask", mask)
 np.save("/data101/makinen/hirax_sims/dataloader/gal_mask", galmask)
 
 
+# --------------------------------------------------------------------------------------
 
-# create train and val datasets and loaders
+
+def preprocess_data(x,y):
+    
+        # split ordering (batch, baseline, freq, ra) = (batch*split, 48, 128, 128)
+        # then transpose to (batch*split, freq, ra, baseline)
+        x = torch.permute(
+            torch.cat(torch.tensor_split(x, split, dim=3)),
+            (0, 3, 1, 2)
+        )
+        y = torch.permute(
+                torch.cat(torch.tensor_split(y, split, dim=3)),
+                (0, 3, 1, 2)
+        )
+        # then finally get the real and im parts as channels
+        # shape: (batch*split, freq, ra, baseline, Re/Im)
+        x = torch.stack([x.real, x.imag], dim=-1)
+        y = torch.stack([y.real, y.imag], dim=-1)
+        
+        
+        # add white noise to the signal
+        if ADD_NOISE:
+            x += torch.normal(mean=0.0, std=torch.ones(x.shape)*NOISEAMP) #.to(device)
+        
+        # pass x to the pca
+        x = PCALayer(x, N_FG=11)
+        
+        # get y into same shape as model outputs
+        y = torch.permute(y, (0, 4, 2, 1, 3))
+        
+        return x.to(device),y.to(device)
+    
+
+def my_collate_fn(batch):
+    x,y = batch
+    x,y = preprocess_data(x,y)
+    return x.to(device), y.to(device)
+
+
+# --------------------------------------------------------------------------------------
+
+
+# create train and val datasets and loaders with collate fn
+
+print("INITIALISING dataloaders")
 
 
 train_dataset = H5Dataset(train_cosmo_files, train_gal_files, use_cache=False)
@@ -128,10 +174,15 @@ val_dataset = H5Dataset(val_cosmo_files, val_gal_files, use_cache=False)
 train_dataloader = DataLoader(
     train_dataset,
     batch_size=2,  # bigger batch ?
-    num_workers=2, # how high can we go ?
+    num_workers=10, # how high can we go ?
     shuffle=False,
-    pin_memory=True # do we need this ?
+    pin_memory=True, # do we need this ?
+    collate_fn=my_collate_fn
 )
+
+# the new collate function is quite generic
+#loader = DataLoader(demo, batch_size=50, shuffle=True, 
+#                    collate_fn=lambda x: tuple(x_.to(device) for x_ in default_collate(x)))
 
 val_dataloader = DataLoader(
     val_dataset,
@@ -140,29 +191,47 @@ val_dataloader = DataLoader(
     pin_memory=True
 )
 
+
 # --------------------------------------------------------------------------------------
 
+# initialise model and accelerator
+
+
 print("INITIALISING MODEL")
+
+    
+# reinitialise the dataloader
+train_dataset = H5Dataset(train_cosmo_files, train_gal_files, use_cache=False)
+
+#train_dataset.use_cache = False
+#train_dataset.num_cosmo = len(train_dataset.cosmo_cache)
+
+train_dataloader = DataLoader(
+    train_dataset,
+    batch_size=1,
+    num_workers=1,
+    shuffle=True,
+)
+
 
 split = 1024 // 128 # 8 chunks per sky simulation
 
 TRAIN_WITH_CACHE = False
-N_FG = 11
 ADD_NOISE = True
-NOISE_AMP = 1.5e-7
+
+#STEPS_PER_EPOCH = 100 # reshuffle data each time 
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+#block = BasicBlock(16, 32)
+model = UNet3d(BasicBlock, filters=16).to(device)
 
 LEARNING_RATE = 5e-4
-
-max_patience = 25
-
-# create model
-model = UNet3d(BasicBlock, filters=8).to(device)
-
 # start up the optimizer
 optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 criterion = logMSELoss()
 
-accel_path = "/data101/makinen/hirax_sims/accelerator/residual_net/"
+accel_path = "/data101/makinen/hirax_sims/accelerator/"
 accelerator = Accelerator(project_dir=accel_path)
 
 model, optimizer, train_dataloader = accelerator.prepare(
@@ -173,47 +242,7 @@ model, optimizer, train_dataloader = accelerator.prepare(
 
 
 
-def preprocess_data(x,y):
-    """
-    PCA preprocessing for foreground sky simulation. 
-
-    Args:
-        x (torch.Tensor): foregrounds + cosmological signal
-        y (torch.Tensor): clean cosmological signal
-
-    Returns:
-        (x,y): Tuple of preprocessed inputs and targets on specified device
-    """
-    # split ordering (batch, baseline, freq, ra) = (batch*split, 48, 128, 128)
-    # then transpose to (batch*split, freq, ra, baseline)
-    x = torch.permute(
-        torch.cat(torch.tensor_split(x, split, dim=3)),
-        (0, 3, 1, 2)
-    )
-    y = torch.permute(
-            torch.cat(torch.tensor_split(y, split, dim=3)),
-            (0, 3, 1, 2)
-    )
-    # then finally get the real and im parts as channels
-    # shape: (batch*split, freq, ra, baseline, Re/Im)
-    x = torch.stack([x.real, x.imag], dim=-1)
-    y = torch.stack([y.real, y.imag], dim=-1)
-
-    # add white noise to the signal
-    if ADD_NOISE:
-        x += torch.normal(mean=0.0, std=torch.ones(x.shape)*NOISE_AMP).to(device)
-    
-    # pass x to the pca
-    x = PCALayer(x, N_FG=N_FG)
-    
-    # get y into same shape as model outputs
-    y = torch.permute(y, (0, 4, 2, 1, 3))
-    
-    return x.to(device),y.to(device)
-    
-
 def train(epoch):
-
     #model.train()
 
     pbar = tqdm(total=len(train_dataloader), position=0)
@@ -222,20 +251,15 @@ def train(epoch):
     total_loss = total_examples = 0
     
     pbar2 = tqdm(train_dataloader, leave=True, position=0)
-
-    patience = 0
-    best_loss = np.inf
-
-    for data in pbar2:
+    for i,data in enumerate(pbar2):
         optimizer.zero_grad()
         
         x,y = data
-        x,y = preprocess_data(x,y)
+        x,y = preprocess_data(x.cpu(),y.cpu())
         
-        y *= model.scaling # 0,2 playing field
-        x *= model.scaling # 0,2 playing field
+        x *= model.scaling
+        y *= model.scaling # same playing field as network
         
-         # model learns residual model(x) = x + y => y_pred = model(x) - x
         preds = model(x)
         loss = criterion(preds, y)
         
@@ -255,15 +279,6 @@ def train(epoch):
             
         pbar.update(1)
 
-        # count patience
-        if total_loss < best_loss:
-            best_loss = total_loss
-            patience = 0
-
-        else:
-            patience += 1
-            
-
     pbar.close()
 
     return total_loss / total_examples
@@ -277,7 +292,7 @@ def test():
     for i,data in tqdm(enumerate(val_dataloader)):
         #if i % 2 == 0:
         x,y = data
-        x,y = preprocess_data(x,y)
+        #x,y = preprocess_data(x,y)
         
         y *= model.scaling # 
         x *= model.scaling
