@@ -13,6 +13,7 @@ import os.path as osp
 import os
 
 import cloudpickle as pickle
+import sys,os,json
 
 from dataloader import *
 from nets import *
@@ -42,6 +43,12 @@ class logMSELoss(nn.Module):
 # --------------------------------------------------------------------------------------
 
 
+### READ IN CONFIGS
+config_file_path = sys.argv[1] #'./comparison/configs.json'
+
+
+with open(config_file_path) as f:
+        configs = json.load(f)
 
 
 
@@ -50,25 +57,33 @@ class logMSELoss(nn.Module):
 # NUM_LAYERS = configs["model_params"][model_type][model_size]["num_layers"]
 # MODEL_NAME = configs["model_params"][model_type][model_size]["name"]
 # TEST_BATCHING = configs["model_params"][model_type][model_size]["test_batching"]
-    
-NOISEAMP = 1.5e-7
+        
+FILTERS = configs["model_params"]["FILTERS"]
+NOISEAMP = configs["model_params"]["NOISEAMP"]
+N_FG = configs["model_params"]["N_FG"]
+MODEL_NAME = configs["model_params"]["MODEL_NAME"]
+
 
 
 # # optimizer schedule
-# LEARNING_RATE = configs["training_params"]["learning_rate"]
-# EPOCHS = int(configs["training_params"]["epochs"])
-# DO_SCHEDULER = bool(int(configs["training_params"]["do_lr_scheduler"]))
+LEARNING_RATE = configs["training_params"]["learning_rate"]
+EPOCHS = int(configs["training_params"]["epochs"])
+DO_SCHEDULER = bool(int(configs["training_params"]["do_lr_scheduler"]))
+SEED = int(configs["training_params"]["seed"])
 
 # # data + out directories
-# DATA_DIR = configs["training_params"]["data_dir"]
-# MODEL_DIR = configs["training_params"]["model_dir"]
-# LOAD_DIR = configs["training_params"]["load_dir"]
+cosmopath = configs["training_params"]["cosmopath"]
+galpath = configs["training_params"]["galpath"]
 
 
-# if not os.path.exists(MODEL_DIR):
-#    # Create a new directory if it does not exist
-#    os.makedirs(MODEL_DIR)
-#    print("created new directory", MODEL_DIR)
+MODEL_DIR = configs["training_params"]["model_dir"]
+LOAD_DIR = configs["training_params"]["load_dir"]
+
+
+if not os.path.exists(MODEL_DIR):
+   # Create a new directory if it does not exist
+   os.makedirs(MODEL_DIR)
+   print("created new directory", MODEL_DIR)
 
 # ### CONSTRUCT MODEL NAME AND OUTPUT PATH
 # MODEL_NAME += "nc_%d_nlyr_%d"%(HIDDEN_CHANNELS, NUM_LAYERS)
@@ -82,15 +97,11 @@ NOISEAMP = 1.5e-7
 print("LOADING DATA AND INITIALISING DATALOADERS")
 
 # fix random seed
-np.random.seed(4)
-torch.manual_seed(4)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
 
 # set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-
-cosmopath = "/data101/makinen/hirax_sims/cosmo_gaussian_pb/"
-galpath = '/data101/makinen/hirax_sims/more_baselines/galaxy_gaussian_pb/'
 
 cosmofiles = os.listdir(cosmopath)
 galfiles = os.listdir(galpath)
@@ -145,7 +156,7 @@ def preprocess_data(x,y):
             x += torch.normal(mean=0.0, std=torch.ones(x.shape)*NOISEAMP) #.to(device)
         
         # pass x to the pca
-        x = PCALayer(x, N_FG=11)
+        x = PCALayer(x, N_FG=N_FG)
         
         # get y into same shape as model outputs
         y = torch.permute(y, (0, 4, 2, 1, 3))
@@ -218,15 +229,12 @@ split = 1024 // 128 # 8 chunks per sky simulation
 
 TRAIN_WITH_CACHE = False
 ADD_NOISE = True
-
 #STEPS_PER_EPOCH = 100 # reshuffle data each time 
-
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 #block = BasicBlock(16, 32)
 model = UNet3d(BasicBlock, filters=16).to(device)
 
-LEARNING_RATE = 5e-4
 # start up the optimizer
 optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 criterion = logMSELoss()
