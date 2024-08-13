@@ -124,7 +124,7 @@ train_cosmo_files = list(np.array(cosmofiles)[mask])
 val_cosmo_files = list(np.array(cosmofiles)[~mask])
 
 galmask = np.random.rand(len(galfiles)) < 0.9
-train_gal_files = list(np.array(galfiles)[galmask])
+train_gal_files = list(np.array(galfiles)[galmask])[:configs["training_params"]["num_train"]]
 val_gal_files = list(np.array(galfiles)[~galmask])
 
 # save the train/val masks
@@ -167,6 +167,7 @@ def preprocess_data(x,y):
     
 
 def my_collate_fn(batch):
+    print("batch", len(batch))
     x,y = batch
     x,y = preprocess_data(x,y)
     return x.to(device), y.to(device)
@@ -185,10 +186,10 @@ val_dataset = H5Dataset(val_cosmo_files, val_gal_files, use_cache=False)
 train_dataloader = DataLoader(
     train_dataset,
     batch_size=2,  # bigger batch ?
-    num_workers=10, # how high can we go ?
+    num_workers=1, # how high can we go ?
     shuffle=False,
     pin_memory=True, # do we need this ?
-    collate_fn=my_collate_fn
+    #collate_fn=my_collate_fn
 )
 
 # the new collate function is quite generic
@@ -211,17 +212,17 @@ val_dataloader = DataLoader(
 print("INITIALISING MODEL")
     
 # reinitialise the dataloader
-train_dataset = H5Dataset(train_cosmo_files, train_gal_files, use_cache=False)
+# train_dataset = H5Dataset(train_cosmo_files, train_gal_files, use_cache=False)
 
-#train_dataset.use_cache = False
-#train_dataset.num_cosmo = len(train_dataset.cosmo_cache)
+# #train_dataset.use_cache = False
+# #train_dataset.num_cosmo = len(train_dataset.cosmo_cache)
 
-train_dataloader = DataLoader(
-    train_dataset,
-    batch_size=1,
-    num_workers=1,
-    shuffle=True,
-)
+# train_dataloader = DataLoader(
+#     train_dataset,
+#     batch_size=1,
+#     num_workers=1,
+#     shuffle=True,
+# )
 
 
 split = 1024 // 128 # 8 chunks per sky simulation
@@ -288,6 +289,9 @@ def train(epoch):
         pbar.update(1)
 
     pbar.close()
+    # dump to save memory
+    gc.collect()
+    torch.cuda.empty_cache()
 
     return total_loss / total_examples
 
@@ -393,3 +397,8 @@ for epoch in range(1, EPOCHS + 1):
 
 # save the history object
 save_obj(history, "train_history")
+
+
+
+
+# should we do the validation checks here ?
