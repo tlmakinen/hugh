@@ -1,21 +1,22 @@
 {
     "training_params" : {
-        "epochs": 100,
+        "epochs": 1,
         "learning_rate": 5e-4,
-        "data_dir": "/data101/makinen/ogbn/",
+        "batch_size": 2,
         "cosmopath": "/data101/makinen/hirax_sims/cosmo_gaussian_pb/",
         "galpath": "/data101/makinen/hirax_sims/more_baselines/galaxy_gaussian_pb/",
         "seed": 42
     },
 
     "model_params":  {
-        "N_FG": 11,
-        "NOISEAMP": 1.5e-7,
-        "FILTERS": 32,
-        "MODEL_NAME": "default"
+        "n_fg": 11,
+        "noiseamp": 1.5e-7,
+        "filters": 32,
+        "model_name": "default",
+        "model_path": "/data101/makinen/hirax_sims/accelerator/",
+        "model_dir": "/data101/makinen/hirax_sims/accelerator/",
+        "load_dir": "/data101/makinen/hirax_sims/accelerator/"
 
-            },
+            }
             
         }
-
-}

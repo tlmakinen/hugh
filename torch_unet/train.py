@@ -58,17 +58,19 @@ with open(config_file_path) as f:
 # MODEL_NAME = configs["model_params"][model_type][model_size]["name"]
 # TEST_BATCHING = configs["model_params"][model_type][model_size]["test_batching"]
         
-FILTERS = configs["model_params"]["FILTERS"]
-NOISEAMP = configs["model_params"]["NOISEAMP"]
-N_FG = configs["model_params"]["N_FG"]
-MODEL_NAME = configs["model_params"]["MODEL_NAME"]
+FILTERS = configs["model_params"]["filters"]
+NOISEAMP = configs["model_params"]["noiseamp"]
+N_FG = configs["model_params"]["n_fg"]
+MODEL_PATH = configs["model_params"]["model_path"]
+MODEL_NAME = configs["model_params"]["model_name"]
 
 
 
 # # optimizer schedule
 LEARNING_RATE = configs["training_params"]["learning_rate"]
+BATCH_SIZE = configs["training_params"]["batch_size"]
 EPOCHS = int(configs["training_params"]["epochs"])
-DO_SCHEDULER = bool(int(configs["training_params"]["do_lr_scheduler"]))
+#DO_SCHEDULER = bool(int(configs["training_params"]["do_lr_scheduler"]))
 SEED = int(configs["training_params"]["seed"])
 
 # # data + out directories
@@ -76,8 +78,8 @@ cosmopath = configs["training_params"]["cosmopath"]
 galpath = configs["training_params"]["galpath"]
 
 
-MODEL_DIR = configs["training_params"]["model_dir"]
-LOAD_DIR = configs["training_params"]["load_dir"]
+MODEL_DIR = configs["model_params"]["model_dir"]
+LOAD_DIR = configs["model_params"]["load_dir"]
 
 
 if not os.path.exists(MODEL_DIR):
@@ -107,8 +109,8 @@ cosmofiles = os.listdir(cosmopath)
 galfiles = os.listdir(galpath)
 
 # save the filenames 
-save_obj(cosmofiles, "/data101/makinen/hirax_sims/dataloader/cosmofiles")
-save_obj(galfiles, "/data101/makinen/hirax_sims/dataloader/galfile")
+#save_obj(cosmofiles, "/data101/makinen/hirax_sims/dataloader/cosmofiles")
+#save_obj(galfiles, "/data101/makinen/hirax_sims/dataloader/galfile")
 
 
 
@@ -126,8 +128,8 @@ train_gal_files = list(np.array(galfiles)[galmask])
 val_gal_files = list(np.array(galfiles)[~galmask])
 
 # save the train/val masks
-np.save("/data101/makinen/hirax_sims/dataloader/cosmo_mask", mask)
-np.save("/data101/makinen/hirax_sims/dataloader/gal_mask", galmask)
+#np.save("/data101/makinen/hirax_sims/dataloader/cosmo_mask", mask)
+#np.save("/data101/makinen/hirax_sims/dataloader/gal_mask", galmask)
 
 
 # --------------------------------------------------------------------------------------
@@ -176,8 +178,6 @@ def my_collate_fn(batch):
 # create train and val datasets and loaders with collate fn
 
 print("INITIALISING dataloaders")
-
-
 train_dataset = H5Dataset(train_cosmo_files, train_gal_files, use_cache=False)
 val_dataset = H5Dataset(val_cosmo_files, val_gal_files, use_cache=False)
 
@@ -209,7 +209,6 @@ val_dataloader = DataLoader(
 
 
 print("INITIALISING MODEL")
-
     
 # reinitialise the dataloader
 train_dataset = H5Dataset(train_cosmo_files, train_gal_files, use_cache=False)
@@ -239,8 +238,9 @@ model = UNet3d(BasicBlock, filters=16).to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 criterion = logMSELoss()
 
-accel_path = "/data101/makinen/hirax_sims/accelerator/"
-accelerator = Accelerator(project_dir=accel_path)
+model_path = MODEL_PATH
+model_path += MODEL_NAME
+accelerator = Accelerator(project_dir=model_path)
 
 model, optimizer, train_dataloader = accelerator.prepare(
                 model, optimizer, train_dataloader)
@@ -293,73 +293,63 @@ def train(epoch):
 
 
 @torch.no_grad()
-def test():
+def test(plot=False):
     model.eval()
 
+    total_loss = total_examples = 0
+
+    #pbar = tqdm(total=len(val_dataloader), position=0)
 
     for i,data in tqdm(enumerate(val_dataloader)):
         #if i % 2 == 0:
         x,y = data
-        #x,y = preprocess_data(x,y)
+        x,y = preprocess_data(x.cpu(),y.cpu())
         
         y *= model.scaling # 
         x *= model.scaling
         
         # model learns residual model(x) = x + y => y_pred = model(x) - x
-        preds = model(x).cpu() #- x.cpu()
+        preds = model(x) #- x.cpu()
         
-        plt.subplot(131)
-        plt.title("truth")
-        plt.imshow(y[0, 0, 0, :, :])
-        plt.colorbar()
+        preds = model(x)
+        loss = criterion(preds, y)
 
-        plt.subplot(132)
-        plt.title("network prediction")
-        plt.imshow(preds[0, 0, 0, :, :])
-        plt.colorbar()
+        preds = preds.cpu()
+        y = y.cpu()
+
+        total_loss += float(loss) #* int(data.train_mask.sum())
+        total_examples += 1 #data.shape #int(data.train_mask.sum())
         
-        
-        plt.subplot(133)
-        plt.title("residual")
-        plt.imshow(((preds[0, 0, 0, :, :] - y[0, 0, 0, :, :])))
-        plt.colorbar()
-        
-        plt.show()
+        if plot:
+            plt.subplot(131)
+            plt.title("truth")
+            plt.imshow(y[0, 0, 0, :, :])
+            plt.colorbar()
+
+            plt.subplot(132)
+            plt.title("network prediction")
+            plt.imshow(preds[0, 0, 0, :, :])
+            plt.colorbar()
+            
+            
+            plt.subplot(133)
+            plt.title("residual")
+            plt.imshow(((preds[0, 0, 0, :, :] - y[0, 0, 0, :, :])))
+            plt.colorbar()
+            
+            plt.show()
     
     val_dataloader.dataset.cosmo_cache = []
     val_dataloader.dataset.gal_cache = []
 
-
-    y_true = {'train': [], 'valid': [], 'test': []}
-    y_pred = {'train': [], 'valid': [], 'test': []}
-
-    pbar = tqdm(total=len(val_dataloader), position=0)
-    pbar.set_description(f'Evaluating epoch: {epoch:04d}')
-
-    for data in val_dataloader:
-        data = data.to(device)
-
-        
-        out = model
-
-        for split in y_true.keys():
-            mask = data[f'{split}_mask']
-            y_true[split].append(data.y[mask].cpu())
-            y_pred[split].append(out[mask].cpu())
-
-        pbar.update(1)
-
-    pbar.close()
-    gc.collect()
+    return total_loss / total_examples
 
 # --------------------------------------------------------------------------------------
 # run the training loop
     
 print("STARTING TRAINING LOOP")
 
-EPOCHS = 30
-
-MODEL_PATH = "/data101/makinen/hirax_sims/accelerator/"
+#MODEL_PATH = "/data101/makinen/hirax_sims/accelerator/"
 
 gc.collect()
 
@@ -367,9 +357,9 @@ gc.collect()
 # training history
 
 history = {
-    "train_aucs": [],
-    "valid_aucs": [],
-    "test_aucs": [],
+    "train_loss": [],
+    "valid_loss": [],
+    "test_loss": [],
     "losses": []
 }
 
@@ -381,11 +371,19 @@ for epoch in range(1, EPOCHS + 1):
     loss = train(epoch)
     loss = float(loss)
 
+    #history["losses"].append(loss)
+    #history["train_aucs"].append(train_rocauc)
+    #history["valid_aucs"].append(valid_rocauc)
+    #history["test_aucs"].append(test_rocauc)
+
     if loss < best_loss:
 
         best_loss = loss
-        accelerator.save_model(model, MODEL_PATH)
-        accelerator.save_state(MODEL_PATH)
+        accelerator.save_model(model, model_path)
+        accelerator.save_state(model_path)
+
+    # save history
+    history["train_loss"].append(loss)
 
     # dump to save memory
     gc.collect()
@@ -393,3 +391,5 @@ for epoch in range(1, EPOCHS + 1):
     
     print(f'Loss: {loss:.4f}')
 
+# save the history object
+save_obj(history, "train_history")
