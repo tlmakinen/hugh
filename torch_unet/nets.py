@@ -8,8 +8,8 @@ from utils import *
 def PCALayer(x, N_FG=7):
     '''
     Takes input in [Nx,Ny,Nz,(Re/Im)] data cube form where Nz is number of redshift 
-    (frequency) bins. N_FG is number of eigenmodes for PCA to remove
-    Cleans foregrounds for Real and Imaginary components separately
+    (frequency) bins. N_FG is number of eigenmodes for PCA to remove.
+    Cleans foregrounds for Real and Imaginary components separately.
     '''
     #print("input", x.shape) # input (batch, RA, baseline, freq) = (None, 128, 48, 128, re/im)freq LAST
 
@@ -18,6 +18,58 @@ def PCALayer(x, N_FG=7):
 
     # then transpose to output to UNet: (None, re/im, baseline, RA, freq)
     return torch.permute(torch.stack((xreal, ximag), dim=-1), (0, 4, 2, 1, 3)) 
+
+
+
+def preprocess_data(x,y, 
+                    N_FG,
+                    device,
+                    noiseamp=None, 
+                    split=1024 // 128
+                     ):
+        """Helper function for passing data to CPU for PCA preprocessing and then back to the GPU
+        for UNet training.
+
+        Args:
+            x (torch.Tensor): batch of input foreground contaminated tiles of shape (Re/Im, baseline, freq, RA) (2, 48, 128, 1024)
+            y (torch.Tensor): target clean cosmological signal of shape (Re/Im, baseline, freq, RA) (2, 48, 128, 1024)
+            N_FG (int): number of PCA foreground components to remove
+            device (torch.device): GPU device addres
+            noiseamp (float, optional): random white noise amplitude to add to training
+            split (_type_, optional): number of tiles to split RA direction into. Defaults to 1024//128.
+
+        Returns:
+            tuple(torch.Tensor): (x,y) torch.Tensor pair, each of shape (batch*split, 48, 128, 128)
+                                 set by default onto the specified device.
+        """
+    
+        # split ordering (batch, baseline, freq, ra) = (batch*split, 48, 128, 128)
+        # then transpose to (batch*split, freq, ra, baseline)
+        x = torch.permute(
+            torch.cat(torch.tensor_split(x, split, dim=3)),
+            (0, 3, 1, 2)
+        )
+        y = torch.permute(
+                torch.cat(torch.tensor_split(y, split, dim=3)),
+                (0, 3, 1, 2)
+        )
+        # then finally get the real and im parts as channels
+        # shape: (batch*split, freq, ra, baseline, Re/Im)
+        x = torch.stack([x.real, x.imag], dim=-1)
+        y = torch.stack([y.real, y.imag], dim=-1)
+        
+        
+        # add white noise to the signal
+        if noiseamp is not None:
+            x += torch.normal(mean=0.0, std=torch.ones(x.shape)*noiseamp) #.to(device)
+        
+        # pass x to the pca
+        x = PCALayer(x, N_FG=N_FG)
+        
+        # get y into same shape as model outputs
+        y = torch.permute(y, (0, 4, 2, 1, 3))
+        
+        return x.to(device),y.to(device)
 
 
 def conv3x3(inplane,outplane, stride=1,padding="same"):
@@ -49,7 +101,7 @@ class UNet3d(nn.Module):
     
 
     def __init__(self, block, filters=16,
-                 scaling=1e5):
+                 scaling=1e5, act=nn.SiLU):
         """initialise model. inherits from BasicBlock class above.
 
         Args:
@@ -60,6 +112,7 @@ class UNet3d(nn.Module):
         
         super(UNet3d,self).__init__()
         fs = filters
+        self.act = act
         self.scaling = scaling
         self.layer1 = self._make_layer(block, 2, fs, blocks=2,stride=1,padding=(1,1,1))
         self.layer2 = self._make_layer(block,fs,fs*2, blocks=1,stride=2,padding=(1,1,1)) # (64,64,24)
@@ -116,13 +169,13 @@ class UNet3d(nn.Module):
         #print("x layer 4", x.shape)
         x  = self.layer5(x)
         #print("x layer 5", x.shape)
-        x  = nn.functional.silu(self.deconv_batchnorm1((self.deconv1(x))),inplace=True)
+        x  = self.act(inplace=True)(self.deconv_batchnorm1((self.deconv1(x))))
        # print("x up 1", x.shape)
         x  = torch.cat((x,x2),dim=1)
         #print("x cat 1", x.shape)
         x  = self.layer6(x)
         #print("x layer 6", x.shape)
-        x  = nn.functional.silu(self.deconv_batchnorm2((self.deconv2(x))),inplace=True)
+        x  = self.act(inplace=True)(self.deconv_batchnorm2((self.deconv2(x))))
         #print("x up 2", x.shape)
         
         x  = torch.cat((x[:, :, :, :], x1[:, :, :, :]),dim=1)

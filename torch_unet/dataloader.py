@@ -37,6 +37,11 @@ class H5Dataset(Dataset):
             root (str, optional): cache root directory. Defaults to "/data101/makinen/hirax_sims/dataloader/".
             num_cosmo (int, optional): number of cosmology simulations to load (from cache). Defaults to -1.
             gal_mask (int, optional): index of galactic plane foreground to remove from. Defaults to 1024.
+
+        Methods:
+            __getitem__(self, idx): 
+                Returns tuple(torch.tensor): (x,y) = (gal+cosmo, cosmo) pairs, each of shape 
+                                            (Re/Im, baseline, freq, RA) (2, 48, 128, 1024)
         """
         
         self.cosmo_h5_file_paths = cosmo_h5_file_paths
@@ -182,36 +187,36 @@ class H5Dataset(Dataset):
             return float(nums[1])
         
 
-    def preprocess_data(self, x, y):
+    # def preprocess_data(self, x, y):
     
-        # split ordering (batch, baseline, freq, ra) = (batch*split, 48, 128, 128)
-        # then transpose to (batch*split, freq, ra, baseline)
-        x = torch.permute(
-            torch.cat(torch.tensor_split(x, self.split, dim=3)),
-            (0, 3, 1, 2)
-        )
-        y = torch.permute(
-                torch.cat(torch.tensor_split(y, self.split, dim=3)),
-                (0, 3, 1, 2)
-        )
-        # then finally get the real and im parts as channels
-        # shape: (batch*split, freq, ra, baseline, Re/Im)
-        x = torch.stack([x.real, x.imag], dim=-1)
-        y = torch.stack([y.real, y.imag], dim=-1)
+    #     # split ordering (batch, baseline, freq, ra) = (batch*split, 48, 128, 128)
+    #     # then transpose to (batch*split, freq, ra, baseline)
+    #     x = torch.permute(
+    #         torch.cat(torch.tensor_split(x, self.split, dim=3)),
+    #         (0, 3, 1, 2)
+    #     )
+    #     y = torch.permute(
+    #             torch.cat(torch.tensor_split(y, self.split, dim=3)),
+    #             (0, 3, 1, 2)
+    #     )
+    #     # then finally get the real and im parts as channels
+    #     # shape: (batch*split, freq, ra, baseline, Re/Im)
+    #     x = torch.stack([x.real, x.imag], dim=-1)
+    #     y = torch.stack([y.real, y.imag], dim=-1)
         
         
-        # add white noise to the signal
-        if self.add_noise:
-            x += torch.normal(mean=0.0, std=torch.ones(x.shape)*self.noise_amp)
+    #     # add white noise to the signal
+    #     if self.add_noise:
+    #         x += torch.normal(mean=0.0, std=torch.ones(x.shape)*self.noise_amp)
         
-        # pass x to the pca
-        x = PCALayer(x, N_FG=self.N_FG)
+    #     # pass x to the pca
+    #     x = PCALayer(x, N_FG=self.N_FG)
         
-        # get y into same shape as model outputs
-        y = torch.permute(y, (0, 4, 2, 1, 3))
+    #     # get y into same shape as model outputs
+    #     y = torch.permute(y, (0, 4, 2, 1, 3))
         
-        # scale data here ?
-        return x, y
+    #     # scale data here ?
+    #     return x, y
 
     def __del__(self):
         for sample_info in self.cosmo_samples:

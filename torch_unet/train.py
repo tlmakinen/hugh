@@ -51,7 +51,6 @@ with open(config_file_path) as f:
         configs = json.load(f)
 
 
-
 # model stuff
 # HIDDEN_CHANNELS = configs["model_params"][model_type][model_size]["hidden_channels"]
 # NUM_LAYERS = configs["model_params"][model_type][model_size]["num_layers"]
@@ -80,6 +79,10 @@ galpath = configs["training_params"]["galpath"]
 
 MODEL_DIR = configs["model_params"]["model_dir"]
 LOAD_DIR = configs["model_params"]["load_dir"]
+LOAD_MODEL = bool(configs["training_params"]["load_model"])
+
+TRAIN_WITH_CACHE = False
+ADD_NOISE = configs["training_params"]["add_noise"]
 
 
 if not os.path.exists(MODEL_DIR):
@@ -113,18 +116,17 @@ galfiles = os.listdir(galpath)
 #save_obj(galfiles, "/data101/makinen/hirax_sims/dataloader/galfile")
 
 
-
 cosmofiles = [cosmopath + p for p in cosmofiles]
 galfiles =  [galpath + p for p in galfiles]
 
 
 # random mask for train/val split
 mask = np.random.rand(len(cosmofiles)) < 0.9
-train_cosmo_files = list(np.array(cosmofiles)[mask])
+train_cosmo_files = list(np.array(cosmofiles)[mask])[:configs["training_params"]["num_train"]]
 val_cosmo_files = list(np.array(cosmofiles)[~mask])
 
 galmask = np.random.rand(len(galfiles)) < 0.9
-train_gal_files = list(np.array(galfiles)[galmask])[:configs["training_params"]["num_train"]]
+train_gal_files = list(np.array(galfiles)[galmask])
 val_gal_files = list(np.array(galfiles)[~galmask])
 
 # save the train/val masks
@@ -227,13 +229,12 @@ print("INITIALISING MODEL")
 
 split = 1024 // 128 # 8 chunks per sky simulation
 
-TRAIN_WITH_CACHE = False
-ADD_NOISE = True
+
 #STEPS_PER_EPOCH = 100 # reshuffle data each time 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 #block = BasicBlock(16, 32)
-model = UNet3d(BasicBlock, filters=16).to(device)
+model = UNet3d(BasicBlock, filters=FILTERS).to(device)
 
 # start up the optimizer
 optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
@@ -245,6 +246,13 @@ accelerator = Accelerator(project_dir=model_path)
 
 model, optimizer, train_dataloader = accelerator.prepare(
                 model, optimizer, train_dataloader)
+
+
+
+if LOAD_MODEL:
+    model.load_state_dict(torch.load(MODEL_PATH))
+    model.eval()
+    history = load_obj(MODEL_DIR + MODEL_NAME + "history.pkl")
 
 
 # --------------------------------------------------------------------------------------
@@ -375,10 +383,8 @@ for epoch in range(1, EPOCHS + 1):
     loss = train(epoch)
     loss = float(loss)
 
-    #history["losses"].append(loss)
-    #history["train_aucs"].append(train_rocauc)
-    #history["valid_aucs"].append(valid_rocauc)
-    #history["test_aucs"].append(test_rocauc)
+    val_loss = float(test())
+
 
     if loss < best_loss:
 
@@ -388,6 +394,9 @@ for epoch in range(1, EPOCHS + 1):
 
     # save history
     history["train_loss"].append(loss)
+    history["val_loss"].append(val_loss)
+
+    save_obj(history, "train_history_inprog")
 
     # dump to save memory
     gc.collect()
