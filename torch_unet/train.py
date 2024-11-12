@@ -18,6 +18,8 @@ import sys,os,json
 from dataloader import *
 from nets import *
 
+from nets2_attn import *
+
 # --------------------------------------------------------------------------------------
 
 def save_obj(obj, name):
@@ -234,7 +236,9 @@ split = 1024 // 128 # 8 chunks per sky simulation
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 #block = BasicBlock(16, 32)
-model = UNet3d(BasicBlock, filters=FILTERS).to(device)
+#model = UNet3d(BasicBlock, filters=FILTERS).to(device)
+model = UNet3DWithAttention(in_channels=2, out_channels=2, init_features=FILTERS)
+
 
 # start up the optimizer
 optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
@@ -370,7 +374,7 @@ gc.collect()
 
 history = {
     "train_loss": [],
-    "valid_loss": [],
+    "val_loss": [],
     "test_loss": [],
     "losses": []
 }
@@ -386,9 +390,9 @@ for epoch in range(1, EPOCHS + 1):
     val_loss = float(test())
 
 
-    if loss < best_loss:
+    if val_loss < best_loss:
 
-        best_loss = loss
+        best_loss = val_loss
         accelerator.save_model(model, model_path)
         accelerator.save_state(model_path)
 

@@ -1,9 +1,67 @@
 import torch
 import torch.nn as nn
+from torch import Tensor
 import numpy as np
 
 
 from utils import *
+
+
+# def smooth_leaky(x, inplace=True):
+#   r"""Smooth Leaky rectified linear unit activation function.
+
+#   Computes the element-wise function:
+
+#   .. math::
+#     \mathrm{smooth\_leaky}(x) = \begin{cases}
+#       x, & x \leq -1\\
+#       - |x|^3/3, & -1 \leq x < 1\\
+#       3x & x > 1
+#     \end{cases}
+
+#   Args:
+#     x : input array
+#   """
+#   return torch.where(x < -1, x, torch.where((x < 1), ((-(torch.abs(x)**3) / 3) + x*(x+2) + (1/3)), 3*x)) / 3.5
+
+
+class smooth_leaky(nn.Module):
+    r"""Smooth Leaky rectified linear unit activation function.
+
+    Computes the element-wise function:
+
+    .. math::
+    \mathrm{smooth\_leaky}(x) = \begin{cases}
+        x, & x \leq -1\\
+        - |x|^3/3, & -1 \leq x < 1\\
+        3x & x > 1
+    \end{cases}
+
+    Args:
+    x : input Tensor
+
+    Examples::
+
+        >>> m = smooth_leaky()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+    """
+
+    __constants__ = ["inplace"]
+    inplace: bool
+
+    def __init__(self, inplace: bool = False):
+        super().__init__()
+        self.inplace = inplace
+
+    def forward(self, input: Tensor) -> Tensor:
+        x = input
+        return torch.where(x < -1, x, torch.where((x < 1), ((-(torch.abs(x)**3) / 3) + x*(x+2) + (1/3)), 3*x)) / 3.5
+
+    def extra_repr(self) -> str:
+        inplace_str = "inplace=True" if self.inplace else ""
+        return inplace_str
+
 
 def PCALayer(x, N_FG=7):
     '''
