@@ -7,22 +7,18 @@ import numpy as np
 from utils import *
 
 
-# def smooth_leaky(x, inplace=True):
-#   r"""Smooth Leaky rectified linear unit activation function.
+def transform_inputs(inputs, scaling=1e5):
+    inputs *= scaling
+    #inputs += 10.0
+    #inputs += 1e-3
+    return torch.arcsinh(inputs)
 
-#   Computes the element-wise function:
-
-#   .. math::
-#     \mathrm{smooth\_leaky}(x) = \begin{cases}
-#       x, & x \leq -1\\
-#       - |x|^3/3, & -1 \leq x < 1\\
-#       3x & x > 1
-#     \end{cases}
-
-#   Args:
-#     x : input array
-#   """
-#   return torch.where(x < -1, x, torch.where((x < 1), ((-(torch.abs(x)**3) / 3) + x*(x+2) + (1/3)), 3*x)) / 3.5
+def inv_transform_inputs(inputs, scaling=1e5):
+    inputs = torch.sinh(inputs)
+    #inputs -= 7.0
+    #inputs -= 1e-3
+    inputs /= scaling
+    return inputs
 
 
 class smooth_leaky(nn.Module):
@@ -79,55 +75,6 @@ def PCALayer(x, N_FG=7):
 
 
 
-def preprocess_data(x,y, 
-                    N_FG,
-                    device,
-                    noiseamp=None, 
-                    split=1024 // 128
-                     ):
-        """Helper function for passing data to CPU for PCA preprocessing and then back to the GPU
-        for UNet training.
-
-        Args:
-            x (torch.Tensor): batch of input foreground contaminated tiles of shape (Re/Im, baseline, freq, RA) (2, 48, 128, 1024)
-            y (torch.Tensor): target clean cosmological signal of shape (Re/Im, baseline, freq, RA) (2, 48, 128, 1024)
-            N_FG (int): number of PCA foreground components to remove
-            device (torch.device): GPU device addres
-            noiseamp (float, optional): random white noise amplitude to add to training
-            split (_type_, optional): number of tiles to split RA direction into. Defaults to 1024//128.
-
-        Returns:
-            tuple(torch.Tensor): (x,y) torch.Tensor pair, each of shape (batch*split, 48, 128, 128)
-                                 set by default onto the specified device.
-        """
-    
-        # split ordering (batch, baseline, freq, ra) = (batch*split, 48, 128, 128)
-        # then transpose to (batch*split, freq, ra, baseline)
-        x = torch.permute(
-            torch.cat(torch.tensor_split(x, split, dim=3)),
-            (0, 3, 1, 2)
-        )
-        y = torch.permute(
-                torch.cat(torch.tensor_split(y, split, dim=3)),
-                (0, 3, 1, 2)
-        )
-        # then finally get the real and im parts as channels
-        # shape: (batch*split, freq, ra, baseline, Re/Im)
-        x = torch.stack([x.real, x.imag], dim=-1)
-        y = torch.stack([y.real, y.imag], dim=-1)
-        
-        
-        # add white noise to the signal
-        if noiseamp is not None:
-            x += torch.normal(mean=0.0, std=torch.ones(x.shape)*noiseamp) #.to(device)
-        
-        # pass x to the pca
-        x = PCALayer(x, N_FG=N_FG)
-        
-        # get y into same shape as model outputs
-        y = torch.permute(y, (0, 4, 2, 1, 3))
-        
-        return x.to(device),y.to(device)
 
 
 def conv3x3(inplane,outplane, stride=1,padding="same"):
@@ -136,7 +83,7 @@ def conv3x3(inplane,outplane, stride=1,padding="same"):
 
 class BasicBlock(nn.Module):
     def __init__(self,inplane,outplane,stride = 1, padding=0,
-                 act=nn.SiLU):
+                 act=nn.LeakyReLU):
         super(BasicBlock, self).__init__()
         self.conv1 = conv3x3(inplane,outplane,padding=padding,stride=stride)
         self.bn1 = nn.BatchNorm3d(outplane)
@@ -159,7 +106,7 @@ class UNet3d(nn.Module):
     
 
     def __init__(self, block, filters=16,
-                 scaling=1e5, act=nn.SiLU):
+                 scaling=1e5, act=nn.LeakyReLU):
         """initialise model. inherits from BasicBlock class above.
 
         Args:
@@ -186,26 +133,11 @@ class UNet3d(nn.Module):
         self.deconv4 = nn.Conv3d(fs,2,kernel_size=3,stride=1,padding=(1,1,1),bias=True,
                     padding_mode="circular") #nn.ConvTranspose3d(64,2,1,stride=1,padding=(1,1,1), output_padding=(1,1,1))
 
-        # self.layer1 = self._make_layer(block, 2, 64, blocks=2,stride=1,padding=(1,1,1))
-        # self.layer2 = self._make_layer(block,64,128, blocks=1,stride=2,padding=(1,1,1)) # (64,64,24)
-        # self.layer3 = self._make_layer(block,128,128,blocks=2,stride=1,padding=(1,1,1))
-        # self.layer4 = self._make_layer(block,128,256,blocks=1,stride=2,padding=(1,1,1)) # (32,32,12)
-        # self.layer5 = self._make_layer(block,256,256,blocks=2,stride=1,padding=(1,1,1))
-        # self.deconv1 = nn.ConvTranspose3d(256,128,3,stride=2,padding=(1,1,1), output_padding=(1,1,1))
-        # self.deconv_batchnorm1 = nn.BatchNorm3d(num_features = 128,momentum=0.1) 
-        # self.layer6 = self._make_layer(block,256,128,blocks=2,stride=1,padding=(1,1,1)) # (64,64,24)
-        # self.deconv2 = nn.ConvTranspose3d(128,64,3,stride=2,padding=(1,1,1), output_padding=(1,1,1))
-        # self.deconv_batchnorm2 = nn.BatchNorm3d(num_features = 64,momentum=0.1)
-        # self.layer7 = self._make_layer(block,128,64,blocks=2,stride=1,padding=(1,1,1))
-        # self.deconv4 = nn.Conv3d(64,2,kernel_size=3,stride=1,padding=(1,1,1),bias=True,
-        #             padding_mode="circular") #nn.ConvTranspose3d(64,2,1,stride=1,padding=(1,1,1), output_padding=(1,1,1))
-
-
 
     def _make_layer(self,block,inplanes,outplanes,blocks,stride=1,padding=0):
         layers = []
         for i in range(0,blocks):
-            layers.append(block(inplanes,outplanes,stride=stride,padding=padding))
+            layers.append(block(inplanes,outplanes,stride=stride,padding=padding,act=self.act))
             inplanes = outplanes
         return nn.Sequential(*layers)
     
@@ -213,9 +145,7 @@ class UNet3d(nn.Module):
         fn = lambda x: PCALayer(x=x, N_FG=N_FG)
         return fn
 
-    def forward(self,x):
-        #x_pca = self.pca(x)
-        #print("x_pca", x_pca.shape)
+    def forward(self,x, train=True):
         
         x1 = self.layer1(x)
         #print("x1", x1.shape)
@@ -242,4 +172,9 @@ class UNet3d(nn.Module):
         x  = self.layer7(x)
         x  = self.deconv4(x)
 
-        return x
+        if train:
+            return x
+
+        else:
+            
+            return inv_transform_inputs(x, scaling=self.scaling)
