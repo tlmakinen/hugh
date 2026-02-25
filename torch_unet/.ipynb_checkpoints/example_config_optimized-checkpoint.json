@@ -1,0 +1,37 @@
+{
+  "model_params": {
+    "filters": 16,
+    "noiseamp": 1.5e-7,
+    "n_fg": 11,
+    "model_path": "/data101/makinen/hirax_sims/accelerator/",
+    "model_dir": "/data101/makinen/hirax_sims/accelerator/",
+    "load_dir": "/data101/makinen/hirax_sims/accelerator/",
+    "model_name": "unet_optimized_25_02",
+    "act": "smooth_leaky",
+    "loss": "logmse"
+  },
+  "training_params": {
+    "learning_rate": 0.0001,
+    "batch_size": 4,
+    "epochs": 100,
+    "gradient_clip": 1.0,
+    "seed": 42,
+    "load_model": false,
+    "add_noise": true,
+    "cosmopath": "/data101/makinen/hirax_sims/cosmo_gaussian_pb/",
+    "galpath": "/data101/makinen/hirax_sims/more_baselines/galaxy_gaussian_pb/",
+    "num_train": 1000
+  },
+    "moment_2_params": {
+        "model_name": "moment_2",
+        "model_path": "/data101/makinen/hirax_sims/accelerator/",
+        "model_dir": "/data101/makinen/hirax_sims/accelerator/",
+        "load_dir": "/data101/makinen/hirax_sims/accelerator/"
+    },
+  "_comments": {
+    "pca_components_path": "OPTIONAL: Path to pre-computed PCA components. If omitted, will auto-detect <model_dir>/pca_components_nfg<n_fg>.pt",
+    "batch_size": "Increased from 2 to 4 for better GPU utilization (adjust based on GPU memory)",
+    "num_train": "Number of training samples to use (-1 for all)",
+    "note": "PCA components are automatically saved to model_dir when running precompute_pca.py"
+  }
+}
