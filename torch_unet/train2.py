@@ -297,8 +297,8 @@ val_dataset = H5Dataset(val_cosmo_files, val_gal_files, use_cache=False)
 
 train_dataloader = DataLoader(
     train_dataset,
-    batch_size=4,  # Increased from 2 (adjust based on GPU memory)
-    num_workers=4,  # Increased from 1 for parallel data loading
+    batch_size=2,  # Increased from 2 (adjust based on GPU memory)
+    num_workers=2,  # Increased from 1 for parallel data loading
     shuffle=True,  # Enable shuffling for better training
     pin_memory=True,  # Keep this - helps with CPU->GPU transfer
     persistent_workers=True,  # Reuse workers to avoid recreation overhead
@@ -307,7 +307,7 @@ train_dataloader = DataLoader(
 
 val_dataloader = DataLoader(
     val_dataset,
-    batch_size=4,  # Match training batch size
+    batch_size=2,  # Match training batch size
     num_workers=2,  # Use workers for validation too
     shuffle=False,
     pin_memory=True,
