@@ -23,6 +23,11 @@ from nets import *
 from nets2_attn import *
 
 # --------------------------------------------------------------------------------------
+# Set PyTorch CUDA memory allocation settings to reduce fragmentation
+# This helps prevent "CUDA out of memory" errors during long training runs
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
+
+# --------------------------------------------------------------------------------------
 
 def save_obj(obj, name):
     with open(name + '.pkl', 'wb') as f:
@@ -368,7 +373,7 @@ def train(epoch):
     
     pbar2 = tqdm(train_dataloader, leave=True, position=0)
     for i, data in enumerate(pbar2):
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)  # More efficient memory cleanup
         
         # Get data - already on CPU from dataloader
         x, y = data
@@ -390,6 +395,13 @@ def train(epoch):
 
         total_loss += float(loss)
         total_examples += 1
+        
+        # Explicitly delete large tensors to help memory management
+        del x, y, preds
+        
+        # Periodically clear cache to reduce fragmentation
+        if i % 10 == 0:
+            torch.cuda.empty_cache()
             
         pbar2.set_description("current loss: %.4f" % (total_loss / total_examples))
         pbar.update(1)
