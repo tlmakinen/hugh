@@ -145,7 +145,7 @@ class UNet3d(nn.Module):
         fn = lambda x: PCALayer(x=x, N_FG=N_FG)
         return fn
 
-    def forward(self,x, train=True):
+    def forward(self,x):
         
         x1 = self.layer1(x)
         #print("x1", x1.shape)
@@ -171,10 +171,8 @@ class UNet3d(nn.Module):
 
         x  = self.layer7(x)
         x  = self.deconv4(x)
+        
+        #x = torch.exp(x)
+        #x = x + minx - 1e3
 
-        if train:
-            return x
-
-        else:
-            
-            return inv_transform_inputs(x, scaling=self.scaling)
+        return x

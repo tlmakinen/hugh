@@ -73,8 +73,6 @@ class LogCoshLoss(torch.nn.Module):
 parser = argparse.ArgumentParser()
 parser.add_argument("--config", type=str, required=True)
 # parser.add_argument("--run-name", type=str, required=False, default="")
-# parser.add_argument("--nde-file", type=str, required=False, default="./laptop_run_8nets/")
-# parser.add_argument("--summary-file", type=str, required=False, default="final_dry_ABC_four_runs_all.pkl")
 
 args = parser.parse_args()
 
@@ -89,10 +87,6 @@ with open(config_file_path) as f:
 
 
 # model stuff
-# HIDDEN_CHANNELS = configs["model_params"][model_type][model_size]["hidden_channels"]
-# NUM_LAYERS = configs["model_params"][model_type][model_size]["num_layers"]
-# MODEL_NAME = configs["model_params"][model_type][model_size]["name"]
-# TEST_BATCHING = configs["model_params"][model_type][model_size]["test_batching"]
         
 FILTERS = configs["model_params"]["filters"]
 NOISEAMP = configs["model_params"]["noiseamp"]
@@ -130,10 +124,6 @@ if not os.path.exists(MODEL_DIR):
    os.makedirs(MODEL_DIR)
    print("created new directory", MODEL_DIR)
 
-# ### CONSTRUCT MODEL NAME AND OUTPUT PATH
-# MODEL_NAME += "nc_%d_nlyr_%d"%(HIDDEN_CHANNELS, NUM_LAYERS)
-# MODEL_PATH = MODEL_DIR + MODEL_NAME
-# LOAD_PATH = LOAD_DIR + MODEL_NAME
 
 
 
@@ -246,10 +236,6 @@ train_dataloader = DataLoader(
     #collate_fn=my_collate_fn
 )
 
-# the new collate function is quite generic
-#loader = DataLoader(demo, batch_size=50, shuffle=True, 
-#                    collate_fn=lambda x: tuple(x_.to(device) for x_ in default_collate(x)))
-
 val_dataloader = DataLoader(
     val_dataset,
     num_workers=0,
@@ -263,8 +249,47 @@ val_dataloader = DataLoader(
 # initialise model and accelerator
 
 
-print("INITIALISING MODEL")
+
+
+print("LOADING FIRST MOMENT MODEL")
     
+
+split = 1024 // 128 # 8 chunks per sky simulation
+
+
+#STEPS_PER_EPOCH = 100 # reshuffle data each time 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+act = smooth_leaky if ACTIVATION == "smooth_leaky" else nn.SiLU
+model_1 = UNet3d(BasicBlock, filters=FILTERS, act=act).to(device)
+model_path = MODEL_PATH
+model_path += MODEL_NAME
+model_1.load_state_dict(torch.load(model_path + "/pytorch_model.bin"))
+model_1.eval()
+
+for name, para in model_1.named_parameters():
+    para.requires_grad = False
+
+model_1.to(torch.bfloat16)
+
+
+print("INITIALISING SECOND MOMENT")
+
+# INITIALISE MOMENT 2 --> "MODEL"
+print("INITIALISING SECOND MOMENT MODEL")
+
+act = smooth_leaky if ACTIVATION == "smooth_leaky" else nn.SiLU
+model = UNet3d(BasicBlock, filters=FILTERS, act=act).to(device)
+model.to(torch.bfloat16)
+
+
+model_path = MODEL_PATH
+model_path += MODEL_NAME
+model_path += "_moment_2"
+
+
+
+
 
 split = 1024 // 128 # 8 chunks per sky simulation
 
@@ -339,16 +364,14 @@ def train(epoch):
         x,y = data
         x,y = preprocess_data(x.cpu(),y.cpu())
         
-        #y *= model.scaling # same playing field as network
-        #x *= model.scaling # scaling factor 
-
-
-        # log-transformation of input data for network
-
+        # MODIFY THIS FOR SECOND MOMENT TRAINING
         preds = model(x.to(torch.bfloat16)).to(torch.float)
-        loss = criterion(preds, y)
         
-        accelerator.backward(loss)
+        # freeze moment_1
+        with torch.no_grad():
+            y = (model_1(x.to(torch.bfloat16)).to(torch.float) - y)**2
+
+        loss = criterion(preds, y)
         
         accelerator.clip_grad_value_(model.parameters(), GRADIENT_CLIP) # GRADIENT CLIPPING
         
@@ -388,7 +411,13 @@ def test(plot=False):
         x,y = data
         x,y = preprocess_data(x.cpu(),y.cpu())
                 
+        # MODIFY THIS FOR SECOND MOMENT TRAINING
         preds = model(x.to(torch.bfloat16)).to(torch.float)
+        
+        # freeze moment_1
+        with torch.no_grad():
+            y = (model_1(x.to(torch.bfloat16)).to(torch.float) - y)**2
+
         loss = criterion(preds, y)
 
         preds = preds.cpu()
