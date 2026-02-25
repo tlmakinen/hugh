@@ -215,20 +215,21 @@ def preprocess_data(x, y, target_device=None, pca_comps=None):
     Preprocess data for training. Memory-optimized version.
     
     Args:
-        x: Input contaminated signal (complex)
-        y: Target cosmology signal (complex)
+        x: Input contaminated signal (complex) - shape: (batch, baseline, freq, ra)
+        y: Target cosmology signal (complex) - shape: (batch, baseline, freq, ra)
         target_device: Device to move data to (if None, keep on current device)
         pca_comps: Pre-computed PCA components (for efficient GPU PCA)
+    
+    Returns:
+        x: Processed input - shape: (batch*split, Re/Im, ra/split, freq, baseline)
+        y: Processed target - shape: (batch*split, Re/Im, ra/split, freq, baseline)
     """
     # Move to target device first if specified
     if target_device is not None:
         x = x.to(target_device, non_blocking=True)
         y = y.to(target_device, non_blocking=True)
     
-    # Split and reshape more efficiently to reduce intermediate tensors
     # Original shape: (batch, baseline, freq, ra) = (batch, 48, 128, 1024)
-    # Target shape: (batch*split, freq, ra/split, baseline)
-    
     batch_size = x.shape[0]
     baseline_dim = x.shape[1]
     freq_dim = x.shape[2]
@@ -256,14 +257,25 @@ def preprocess_data(x, y, target_device=None, pca_comps=None):
         x.add_(torch.randn_like(x) * NOISEAMP)  # In-place addition
     
     # PCA cleaning (now GPU-friendly with pre-computed components!)
+    # PCALayer input: (batch*split, freq, ra/split, baseline, Re/Im)
+    # PCALayer output: (batch*split, Re/Im, baseline, ra/split, freq) 
+    # [according to PCALayer line 121-122: permute (0, 4, 2, 1, 3)]
     x = PCALayer(x, N_FG=N_FG, pca_components=pca_comps)
 
     # Scale data
     x.mul_(1e5)  # In-place multiplication
     y.mul_(1e5)
     
-    # Get y into same shape as model outputs: (batch*split, Re/Im, baseline, ra/split, freq)
-    y = y.permute(0, 4, 3, 2, 1)
+    # Model expects input shape: (batch*split, Re/Im, ra/split, freq, baseline)
+    # x is currently: (batch*split, Re/Im, baseline, ra/split, freq)
+    # Permute x: (0, 1, 2, 3, 4) → (0, 1, 3, 4, 2)
+    x = x.permute(0, 1, 3, 4, 2)  # → (batch*split, Re/Im, ra/split, freq, baseline)
+    
+    # Transform y to match model output format:
+    # y is currently: (batch*split, freq, ra/split, baseline, Re/Im)
+    # Target format: (batch*split, Re/Im, ra/split, freq, baseline)
+    # Permute: (0, 1, 2, 3, 4) → (0, 4, 2, 1, 3)
+    y = y.permute(0, 4, 2, 1, 3)  # → (batch*split, Re/Im, ra/split, freq, baseline)
     
     return x, y
     
