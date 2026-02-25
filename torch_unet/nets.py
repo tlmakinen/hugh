@@ -59,16 +59,28 @@ class smooth_leaky(nn.Module):
         return inplace_str
 
 
-def PCALayer(x, N_FG=7):
+def PCALayer(x, N_FG=7, pca_components=None):
     '''
     Takes input in [Nx,Ny,Nz,(Re/Im)] data cube form where Nz is number of redshift 
     (frequency) bins. N_FG is number of eigenmodes for PCA to remove.
     Cleans foregrounds for Real and Imaginary components separately.
+    
+    Args:
+        x: Input tensor (..., freq, Re/Im)
+        N_FG: Number of foreground components (only used if pca_components is None)
+        pca_components: Pre-computed PCA components dict (RECOMMENDED for efficiency)
     '''
     #print("input", x.shape) # input (batch, RA, baseline, freq) = (None, 128, 48, 128, re/im)freq LAST
 
-    xreal = PCAclean(x[..., 0], N_FG=N_FG)[0] # output is (None, RA, baseline, freq)
-    ximag = PCAclean(x[..., 1], N_FG=N_FG)[0]
+    if pca_components is not None:
+        # Use pre-computed PCA (MUCH faster and GPU-friendly)
+        from utils import apply_precomputed_pca_fast
+        xreal = apply_precomputed_pca_fast(x[..., 0], pca_components)
+        ximag = apply_precomputed_pca_fast(x[..., 1], pca_components)
+    else:
+        # Fallback to on-the-fly PCA (slow, for backward compatibility)
+        xreal = PCAclean(x[..., 0], N_FG=N_FG)[0] # output is (None, RA, baseline, freq)
+        ximag = PCAclean(x[..., 1], N_FG=N_FG)[0]
 
     # then transpose to output to UNet: (None, re/im, baseline, RA, freq)
     return torch.permute(torch.stack((xreal, ximag), dim=-1), (0, 4, 2, 1, 3)) 

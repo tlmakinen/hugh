@@ -109,8 +109,11 @@ class H5Dataset(Dataset):
             gal_file = gal_sample_info['file']
             gal = torch.tensor(np.array(gal_file['/vis/']), dtype=torch.complex64)
 
-            self.gal_cache.append(gal)
-            self.cosmo_cache.append(cosmo)
+            # Only append to cache if we're building it
+            # IMPORTANT: This prevents memory leak when use_cache=False
+            if len(self.gal_cache) < len(self.cosmo_samples):
+                self.gal_cache.append(gal)
+                self.cosmo_cache.append(cosmo)
             
             # now get x and y
             x = gal + cosmo

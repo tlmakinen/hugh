@@ -101,6 +101,9 @@ MODEL_PATH = configs["model_params"]["model_path"]
 MODEL_NAME = configs["model_params"]["model_name"]
 ACTIVATION = configs["model_params"]["act"]
 
+# PCA components path (for pre-computed PCA)
+PCA_COMPONENTS_PATH = configs["model_params"].get("pca_components_path", None)
+
 
 
 # # optimizer schedule
@@ -148,6 +151,16 @@ torch.manual_seed(SEED)
 # set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+# Load pre-computed PCA components if available
+pca_components = None
+if PCA_COMPONENTS_PATH and os.path.exists(PCA_COMPONENTS_PATH):
+    print(f"Loading pre-computed PCA components from {PCA_COMPONENTS_PATH}")
+    pca_components = torch.load(PCA_COMPONENTS_PATH, map_location=device)
+    print(f"  - Loaded {pca_components['N_FG']} foreground components")
+    print(f"  - Frequency bins: {pca_components['N_freq']}")
+else:
+    print("WARNING: No pre-computed PCA components found. PCA will be computed on-the-fly (slower).")
+
 cosmofiles = os.listdir(cosmopath)
 galfiles = os.listdir(galpath)
 
@@ -179,45 +192,54 @@ val_gal_files = list(np.array(galfiles)[~galmask])
 
 
 
-def preprocess_data(x,y):
+def preprocess_data(x, y, target_device=None, pca_comps=None):
+    """
+    Preprocess data for training. Now GPU-optimized!
     
-        # split ordering (batch, baseline, freq, ra) = (batch*split, 48, 128, 128)
-        # then transpose to (batch*split, freq, ra, baseline)
-        x = torch.permute(
-            torch.cat(torch.tensor_split(x, split, dim=3)),
-            (0, 3, 1, 2)
-        )
-        y = torch.permute(
-                torch.cat(torch.tensor_split(y, split, dim=3)),
-                (0, 3, 1, 2)
-        )
-        # then finally get the real and im parts as channels
-        # shape: (batch*split, freq, ra, baseline, Re/Im)
-        x = torch.stack([x.real, x.imag], dim=-1)
-        y = torch.stack([y.real, y.imag], dim=-1)
+    Args:
+        x: Input contaminated signal (complex)
+        y: Target cosmology signal (complex)
+        target_device: Device to move data to (if None, keep on current device)
+        pca_comps: Pre-computed PCA components (for efficient GPU PCA)
+    """
+    # Move to target device first if specified
+    if target_device is not None:
+        x = x.to(target_device)
+        y = y.to(target_device)
+    
+    # split ordering (batch, baseline, freq, ra) = (batch*split, 48, 128, 128)
+    # then transpose to (batch*split, freq, ra, baseline)
+    x = torch.permute(
+        torch.cat(torch.tensor_split(x, split, dim=3)),
+        (0, 3, 1, 2)
+    )
+    y = torch.permute(
+        torch.cat(torch.tensor_split(y, split, dim=3)),
+        (0, 3, 1, 2)
+    )
+    
+    # then finally get the real and im parts as channels
+    # shape: (batch*split, freq, ra, baseline, Re/Im)
+    x = torch.stack([x.real, x.imag], dim=-1)
+    y = torch.stack([y.real, y.imag], dim=-1)
 
-        
-        # add white noise to the signal
-        if ADD_NOISE:
-            x += torch.normal(mean=0.0, std=torch.ones(x.shape)*NOISEAMP) #.to(device)
-        
-        # pass x to the pca
-        x = PCALayer(x, N_FG=N_FG)
+    # add white noise to the signal
+    if ADD_NOISE:
+        # Generate noise on same device
+        noise = torch.normal(mean=0.0, std=NOISEAMP, size=x.shape, 
+                           device=x.device, dtype=x.dtype)
+        x = x + noise
+    
+    # pass x to the pca (now GPU-friendly with pre-computed components!)
+    x = PCALayer(x, N_FG=N_FG, pca_components=pca_comps)
 
-        x *= 1e5
-        y *= 1e5
-        
-        # log-transformation of input data for network
-        #x = transform_inputs(x, scaling=1e5)
-        
-        # transformation of outputs handled in the loss function
-        #y = transform_inputs(y, scaling=1e5)
-
-        
-        # get y into same shape as model outputs
-        y = torch.permute(y, (0, 4, 2, 1, 3))
-        
-        return x.to(device),y.to(device)
+    x *= 1e5
+    y *= 1e5
+    
+    # get y into same shape as model outputs
+    y = torch.permute(y, (0, 4, 2, 1, 3))
+    
+    return x, y
     
 
 def my_collate_fn(batch):
@@ -239,22 +261,22 @@ val_dataset = H5Dataset(val_cosmo_files, val_gal_files, use_cache=False)
 
 train_dataloader = DataLoader(
     train_dataset,
-    batch_size=2,  # bigger batch ?
-    num_workers=1, # how high can we go ?
-    shuffle=False,
-    pin_memory=True, # do we need this ?
-    #collate_fn=my_collate_fn
+    batch_size=4,  # Increased from 2 (adjust based on GPU memory)
+    num_workers=4,  # Increased from 1 for parallel data loading
+    shuffle=True,  # Enable shuffling for better training
+    pin_memory=True,  # Keep this - helps with CPU->GPU transfer
+    persistent_workers=True,  # Reuse workers to avoid recreation overhead
+    prefetch_factor=2,  # Prefetch batches for pipeline efficiency
 )
-
-# the new collate function is quite generic
-#loader = DataLoader(demo, batch_size=50, shuffle=True, 
-#                    collate_fn=lambda x: tuple(x_.to(device) for x_ in default_collate(x)))
 
 val_dataloader = DataLoader(
     val_dataset,
-    num_workers=0,
+    batch_size=4,  # Match training batch size
+    num_workers=2,  # Use workers for validation too
     shuffle=False,
-    pin_memory=True
+    pin_memory=True,
+    persistent_workers=True,
+    prefetch_factor=2,
 )
 
 
@@ -324,7 +346,7 @@ if LOAD_MODEL:
 
 
 def train(epoch):
-    #model.train()
+    model.train()  # Enable training mode
 
     pbar = tqdm(total=len(train_dataloader), position=0)
     pbar.set_description(f'Training epoch: {epoch:04d}')
@@ -332,43 +354,36 @@ def train(epoch):
     total_loss = total_examples = 0
     
     pbar2 = tqdm(train_dataloader, leave=True, position=0)
-    for i,data in enumerate(pbar2):
+    for i, data in enumerate(pbar2):
         optimizer.zero_grad()
         
+        # Get data - already on CPU from dataloader
+        x, y = data
         
-        x,y = data
-        x,y = preprocess_data(x.cpu(),y.cpu())
+        # Preprocess on GPU (much faster than CPU preprocessing!)
+        x, y = preprocess_data(x, y, target_device=device, pca_comps=pca_components)
         
-        #y *= model.scaling # same playing field as network
-        #x *= model.scaling # scaling factor 
-
-
-        # log-transformation of input data for network
-
+        # Forward pass with bfloat16
         preds = model(x.to(torch.bfloat16)).to(torch.float)
         loss = criterion(preds, y)
         
+        # Backward pass
         accelerator.backward(loss)
         
-        accelerator.clip_grad_value_(model.parameters(), GRADIENT_CLIP) # GRADIENT CLIPPING
+        # Gradient clipping
+        accelerator.clip_grad_value_(model.parameters(), GRADIENT_CLIP)
         
-        optimizer.step() 
-        #if DO_SCHEDULER:
-        #    lr_scheduler.step()
+        optimizer.step()
 
-        total_loss += float(loss) #* int(data.train_mask.sum())
-        total_examples += 1 #data.shape #int(data.train_mask.sum())
-        
-        if not TRAIN_WITH_CACHE:
-            train_dataloader.dataset.gal_cache = []
-            train_dataloader.dataset.cosmo_cache = []
+        total_loss += float(loss)
+        total_examples += 1
             
-        pbar2.set_description("current loss: %.4f"%(total_loss / total_examples))
-            
+        pbar2.set_description("current loss: %.4f" % (total_loss / total_examples))
         pbar.update(1)
 
     pbar.close()
-    # dump to save memory
+    
+    # Clear GPU cache
     gc.collect()
     torch.cuda.empty_cache()
 
@@ -381,43 +396,42 @@ def test(plot=False):
 
     total_loss = total_examples = 0
 
-    #pbar = tqdm(total=len(val_dataloader), position=0)
-
-    for i,data in tqdm(enumerate(val_dataloader)):
-        #if i % 2 == 0:
-        x,y = data
-        x,y = preprocess_data(x.cpu(),y.cpu())
+    for i, data in tqdm(enumerate(val_dataloader), desc="Validation"):
+        # Get data
+        x, y = data
+        
+        # Preprocess on GPU
+        x, y = preprocess_data(x, y, target_device=device, pca_comps=pca_components)
                 
+        # Forward pass
         preds = model(x.to(torch.bfloat16)).to(torch.float)
         loss = criterion(preds, y)
 
-        preds = preds.cpu()
-        y = y.cpu()
-
-        total_loss += float(loss) #* int(data.train_mask.sum())
-        total_examples += 1 #data.shape #int(data.train_mask.sum())
+        total_loss += float(loss)
+        total_examples += 1
         
-        if plot:
+        if plot and i == 0:  # Only plot first batch
+            preds_cpu = preds.cpu()
+            y_cpu = y.cpu()
+            
+            plt.figure(figsize=(15, 5))
             plt.subplot(131)
             plt.title("truth")
-            plt.imshow(y[0, 0, 0, :, :])
+            plt.imshow(y_cpu[0, 0, 0, :, :])
             plt.colorbar()
 
             plt.subplot(132)
             plt.title("network prediction")
-            plt.imshow(preds[0, 0, 0, :, :])
+            plt.imshow(preds_cpu[0, 0, 0, :, :])
             plt.colorbar()
-            
             
             plt.subplot(133)
             plt.title("residual")
-            plt.imshow(((preds[0, 0, 0, :, :] - y[0, 0, 0, :, :])))
+            plt.imshow((preds_cpu[0, 0, 0, :, :] - y_cpu[0, 0, 0, :, :]))
             plt.colorbar()
             
+            plt.tight_layout()
             plt.show()
-    
-    val_dataloader.dataset.cosmo_cache = []
-    val_dataloader.dataset.gal_cache = []
 
     return total_loss / total_examples
 
