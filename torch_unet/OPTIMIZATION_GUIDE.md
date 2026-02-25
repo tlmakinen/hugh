@@ -26,14 +26,14 @@ This guide describes the major performance and memory optimizations made to the 
 
 ```bash
 # Step 1: Pre-compute PCA components from training data
-# (Automatically saves to <model_dir>/pca_components_nfg<N_FG>.pt)
+# (Automatically saves to <model_dir>/<model_name>/pca_components_nfg<N_FG>.pt)
 python precompute_pca.py \
     --config your_config.json \
     --num-samples 100 \
     --device cpu
 
 # Step 2: Run training as normal
-# (Automatically detects PCA components in model directory)
+# (Automatically detects PCA components in <model_dir>/<model_name>/)
 python train2.py --config your_config.json
 ```
 

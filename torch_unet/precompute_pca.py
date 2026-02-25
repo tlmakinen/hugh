@@ -169,16 +169,20 @@ def main():
     galpath = configs["training_params"]["galpath"]
     N_FG = configs["model_params"]["n_fg"]
     MODEL_DIR = configs["model_params"]["model_dir"]
+    MODEL_NAME = configs["model_params"]["model_name"]
     
-    # Default output path: save to model directory
+    # Default output path: save to model_dir/model_name/ directory
     if args.output is None:
+        # Construct full model path (same as train2.py does)
+        full_model_path = os.path.join(MODEL_DIR, MODEL_NAME)
+        
         # Create model directory if it doesn't exist
-        if not os.path.exists(MODEL_DIR):
-            os.makedirs(MODEL_DIR)
-            print(f"Created model directory: {MODEL_DIR}")
+        if not os.path.exists(full_model_path):
+            os.makedirs(full_model_path)
+            print(f"Created model directory: {full_model_path}")
         
         # Generate filename based on N_FG parameter
-        output_path = os.path.join(MODEL_DIR, f"pca_components_nfg{N_FG}.pt")
+        output_path = os.path.join(full_model_path, f"pca_components_nfg{N_FG}.pt")
         print(f"Using default output path: {output_path}")
     else:
         output_path = args.output

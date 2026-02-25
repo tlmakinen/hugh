@@ -17,7 +17,7 @@ python precompute_pca.py --config your_config.json --num-samples 100
 ```
 
 This takes ~5-10 minutes and only needs to be done once.  
-**The PCA components are automatically saved to your model directory.**
+**The PCA components are automatically saved to `<model_dir>/<model_name>/pca_components_nfg<N_FG>.pt`**
 
 ### Step 2: Train Normally
 
@@ -27,7 +27,7 @@ python train2.py --config your_config.json
 
 That's it! Training should be ~5-10x faster.
 
-**Note**: The training script automatically looks for PCA components in your model directory.  
+**Note**: The training script automatically looks for PCA components in `<model_dir>/<model_name>/`.  
 No config changes needed! (But you can specify a custom path with `"pca_components_path"` if desired)
 
 ## Validate the Optimization (Optional)
@@ -136,14 +136,30 @@ num_workers=4  // increase to 6 or 8
 
 **~6x speedup per epoch!**
 
+## File Organization
+
+Your model directory structure will look like:
+```
+models/
+└── unet_optimized_25_02/                    ← Model-specific directory (model_name)
+    ├── pca_components_nfg11.pt             ← PCA components (auto-saved here)
+    ├── pytorch_model.bin                   ← Model weights
+    ├── optimizer.bin                       ← Optimizer state
+    └── ...other training artifacts
+```
+
+This keeps everything organized per model, making it easy to:
+- Track which PCA components belong to which model
+- Have different models with different `N_FG` values
+- Clean up old experiments by removing the entire model directory
+
 ## Next Steps
 
 1. ✅ Pre-compute PCA components
-2. ✅ Update config file
-3. ✅ Run validation script
-4. ✅ Start training
-5. 📊 Monitor GPU utilization (`nvidia-smi`)
-6. 🚀 Scale up batch size if you have GPU memory
+2. ✅ Run validation script (optional)
+3. ✅ Start training
+4. 📊 Monitor GPU utilization (`nvidia-smi`)
+5. 🚀 Scale up batch size if you have GPU memory
 
 ## Questions?
 

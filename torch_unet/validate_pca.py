@@ -149,10 +149,12 @@ def main():
         # Try to auto-detect from config
         pca_path = configs["model_params"].get("pca_components_path", None)
         if pca_path is None:
-            # Try default location in model directory
+            # Try default location in model_name directory
             MODEL_DIR = configs["model_params"]["model_dir"]
+            MODEL_NAME = configs["model_params"]["model_name"]
             N_FG = configs["model_params"]["n_fg"]
-            pca_path = os.path.join(MODEL_DIR, f"pca_components_nfg{N_FG}.pt")
+            full_model_path = os.path.join(MODEL_DIR, MODEL_NAME)
+            pca_path = os.path.join(full_model_path, f"pca_components_nfg{N_FG}.pt")
         args.pca_components = pca_path
     
     if not os.path.exists(args.pca_components):

@@ -29,9 +29,9 @@
         "load_dir": "/data101/makinen/hirax_sims/accelerator/"
     },
   "_comments": {
-    "pca_components_path": "OPTIONAL: Path to pre-computed PCA components. If omitted, will auto-detect <model_dir>/pca_components_nfg<n_fg>.pt",
+    "pca_components_path": "OPTIONAL: Path to pre-computed PCA components. If omitted, will auto-detect <model_dir>/<model_name>/pca_components_nfg<n_fg>.pt",
     "batch_size": "Increased from 2 to 4 for better GPU utilization (adjust based on GPU memory)",
     "num_train": "Number of training samples to use (-1 for all)",
-    "note": "PCA components are automatically saved to model_dir when running precompute_pca.py"
+    "note": "PCA components are automatically saved to <model_dir>/<model_name>/ when running precompute_pca.py"
   }
 }

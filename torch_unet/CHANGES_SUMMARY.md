@@ -215,8 +215,8 @@ def PCALayer(x, N_FG=7, pca_components=None):
 **No config changes required!** 
 
 The system automatically:
-- Saves PCA components to `<model_dir>/pca_components_nfg<N_FG>.pt`
-- Detects PCA components in the model directory
+- Saves PCA components to `<model_dir>/<model_name>/pca_components_nfg<N_FG>.pt`
+- Detects PCA components in the model-specific directory
 
 **Optional**: Override with custom path in `config.json`:
 ```json
@@ -237,14 +237,14 @@ The system automatically:
    python precompute_pca.py --config your_config.json
    ```
    
-   This automatically saves to `<model_dir>/pca_components_nfg<N_FG>.pt`
+   This automatically saves to `<model_dir>/<model_name>/pca_components_nfg<N_FG>.pt`
 
 2. **Run training**:
    ```bash
    python train2.py --config your_config.json
    ```
    
-   Training automatically detects PCA components in model directory.
+   Training automatically detects PCA components in model-specific directory.
 
 **That's it! No config changes needed.**
 
