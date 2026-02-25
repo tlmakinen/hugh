@@ -51,8 +51,44 @@ class smooth_leaky(nn.Module):
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Memory-efficient implementation using masked tensor operations
+        instead of nested torch.where calls. Reduces intermediate tensor creation.
+        """
         x = input
-        return torch.where(x < -1, x, torch.where((x < 1), ((-(torch.abs(x)**3) / 3) + x*(x+2) + (1/3)), 3*x)) / 3.5
+        
+        # Pre-allocate output tensor (reuse input if inplace)
+        if self.inplace:
+            out = x
+        else:
+            out = torch.empty_like(x)
+        
+        # Create masks for each region
+        mask_low = x < -1     # Region 1: x < -1
+        mask_high = x >= 1    # Region 3: x >= 1
+        # Region 2 is everything else: -1 <= x < 1
+        
+        # Apply piecewise function efficiently
+        # Region 1: out = x (copy input values)
+        out.copy_(x)
+        
+        # Region 2: out = (-(|x|^3) / 3) + x*(x+2) + (1/3)
+        # Only compute for middle region to save operations
+        mask_mid = ~(mask_low | mask_high)
+        if mask_mid.any():
+            x_mid = x[mask_mid]
+            x_sq = x_mid * x_mid
+            # Compute: -(|x|^3)/3 + x*(x+2) + 1/3 = -(|x|^3)/3 + x^2 + 2x + 1/3
+            out[mask_mid] = -(torch.abs(x_mid) * x_sq) / 3.0 + x_sq + 2.0 * x_mid + (1.0/3.0)
+        
+        # Region 3: out = 3*x
+        if mask_high.any():
+            out[mask_high] = 3.0 * x[mask_high]
+        
+        # Scale by 3.5 (in-place)
+        out.mul_(1.0 / 3.5)
+        
+        return out
 
     def extra_repr(self) -> str:
         inplace_str = "inplace=True" if self.inplace else ""
