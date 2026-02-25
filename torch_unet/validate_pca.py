@@ -129,8 +129,8 @@ def plot_comparison(old_result, new_result, idx=0):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--pca-components", type=str, required=True, 
-                       help="Path to pre-computed PCA components")
+    parser.add_argument("--pca-components", type=str, default=None, 
+                       help="Path to pre-computed PCA components (default: auto-detect from config)")
     parser.add_argument("--config", type=str, required=True,
                        help="Path to training config")
     parser.add_argument("--num-samples", type=int, default=5,
@@ -140,17 +140,33 @@ def main():
     
     args = parser.parse_args()
     
+    # Load config first to get default paths
+    with open(args.config) as f:
+        configs = json.load(f)
+    
+    # Determine PCA components path
+    if args.pca_components is None:
+        # Try to auto-detect from config
+        pca_path = configs["model_params"].get("pca_components_path", None)
+        if pca_path is None:
+            # Try default location in model directory
+            MODEL_DIR = configs["model_params"]["model_dir"]
+            N_FG = configs["model_params"]["n_fg"]
+            pca_path = os.path.join(MODEL_DIR, f"pca_components_nfg{N_FG}.pt")
+        args.pca_components = pca_path
+    
+    if not os.path.exists(args.pca_components):
+        print(f"ERROR: PCA components not found at {args.pca_components}")
+        print(f"Run: python precompute_pca.py --config {args.config}")
+        return
+    
     # Load PCA components
     print(f"Loading PCA components from {args.pca_components}")
     pca_components = torch.load(args.pca_components, map_location='cpu')
     print(f"  N_FG: {pca_components['N_FG']}")
     print(f"  N_freq: {pca_components['N_freq']}")
     
-    # Load config
-    with open(args.config) as f:
-        configs = json.load(f)
-    
-    # Setup dataset
+    # Setup dataset (configs already loaded above)
     cosmopath = configs["training_params"]["cosmopath"]
     galpath = configs["training_params"]["galpath"]
     N_FG = configs["model_params"]["n_fg"]

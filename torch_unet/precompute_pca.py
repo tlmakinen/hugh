@@ -153,7 +153,8 @@ def apply_precomputed_pca(data, pca_components, use_signal_projection=False):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, required=True, help="Path to training config")
-    parser.add_argument("--output", type=str, default="pca_components.pt", help="Output file")
+    parser.add_argument("--output", type=str, default=None, 
+                       help="Output file path (default: <model_dir>/pca_components_nfg<N_FG>.pt)")
     parser.add_argument("--num-samples", type=int, default=100, help="Number of samples for PCA")
     parser.add_argument("--device", type=str, default="cpu", help="Device for computation")
     
@@ -167,6 +168,21 @@ def main():
     cosmopath = configs["training_params"]["cosmopath"]
     galpath = configs["training_params"]["galpath"]
     N_FG = configs["model_params"]["n_fg"]
+    MODEL_DIR = configs["model_params"]["model_dir"]
+    
+    # Default output path: save to model directory
+    if args.output is None:
+        # Create model directory if it doesn't exist
+        if not os.path.exists(MODEL_DIR):
+            os.makedirs(MODEL_DIR)
+            print(f"Created model directory: {MODEL_DIR}")
+        
+        # Generate filename based on N_FG parameter
+        output_path = os.path.join(MODEL_DIR, f"pca_components_nfg{N_FG}.pt")
+        print(f"Using default output path: {output_path}")
+    else:
+        output_path = args.output
+        print(f"Using specified output path: {output_path}")
     
     cosmofiles = os.listdir(cosmopath)
     galfiles = os.listdir(galpath)
@@ -193,8 +209,8 @@ def main():
     )
     
     # Save
-    torch.save(pca_components, args.output)
-    print(f"Saved PCA components to {args.output}")
+    torch.save(pca_components, output_path)
+    print(f"\nSaved PCA components to {output_path}")
     
     # Print statistics
     print("\nPCA Statistics:")

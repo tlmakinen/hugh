@@ -26,22 +26,25 @@ This guide describes the major performance and memory optimizations made to the 
 
 ```bash
 # Step 1: Pre-compute PCA components from training data
+# (Automatically saves to <model_dir>/pca_components_nfg<N_FG>.pt)
 python precompute_pca.py \
     --config your_config.json \
-    --output pca_components.pt \
     --num-samples 100 \
     --device cpu
 
-# Step 2: Update your config.json to point to the PCA file
+# Step 2: Run training as normal
+# (Automatically detects PCA components in model directory)
+python train2.py --config your_config.json
+```
+
+**Optional**: Specify custom PCA path in config:
+```json
 {
   "model_params": {
     ...
-    "pca_components_path": "pca_components.pt"
+    "pca_components_path": "path/to/custom/pca_components.pt"
   }
 }
-
-# Step 3: Run training as normal
-python train2.py --config your_config.json
 ```
 
 ### 2. GPU Preprocessing Pipeline

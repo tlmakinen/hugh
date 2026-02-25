@@ -153,6 +153,14 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Load pre-computed PCA components if available
 pca_components = None
+
+# If no path specified, try default location in model directory
+if PCA_COMPONENTS_PATH is None:
+    default_pca_path = os.path.join(MODEL_DIR, f"pca_components_nfg{N_FG}.pt")
+    if os.path.exists(default_pca_path):
+        PCA_COMPONENTS_PATH = default_pca_path
+        print(f"Found PCA components at default location: {PCA_COMPONENTS_PATH}")
+
 if PCA_COMPONENTS_PATH and os.path.exists(PCA_COMPONENTS_PATH):
     print(f"Loading pre-computed PCA components from {PCA_COMPONENTS_PATH}")
     pca_components = torch.load(PCA_COMPONENTS_PATH, map_location=device)
@@ -160,6 +168,7 @@ if PCA_COMPONENTS_PATH and os.path.exists(PCA_COMPONENTS_PATH):
     print(f"  - Frequency bins: {pca_components['N_freq']}")
 else:
     print("WARNING: No pre-computed PCA components found. PCA will be computed on-the-fly (slower).")
+    print(f"  To speed up training, run: python precompute_pca.py --config {config_file_path}")
 
 cosmofiles = os.listdir(cosmopath)
 galfiles = os.listdir(galpath)

@@ -8,39 +8,27 @@
 ✅ **Fixed memory leak**: Stable memory usage  
 ✅ **Overall**: ~5-10x faster training  
 
-## How to Use (3 Steps)
+## How to Use (2 Steps!)
 
 ### Step 1: Pre-compute PCA Components (One-time setup)
 
 ```bash
-python precompute_pca.py \
-    --config your_config.json \
-    --output pca_components.pt \
-    --num-samples 100
+python precompute_pca.py --config your_config.json --num-samples 100
 ```
 
-This takes ~5-10 minutes and only needs to be done once.
+This takes ~5-10 minutes and only needs to be done once.  
+**The PCA components are automatically saved to your model directory.**
 
-### Step 2: Update Your Config
-
-Add one line to your `config.json`:
-
-```json
-{
-  "model_params": {
-    ...
-    "pca_components_path": "pca_components.pt"  // ADD THIS LINE
-  }
-}
-```
-
-### Step 3: Train Normally
+### Step 2: Train Normally
 
 ```bash
 python train2.py --config your_config.json
 ```
 
 That's it! Training should be ~5-10x faster.
+
+**Note**: The training script automatically looks for PCA components in your model directory.  
+No config changes needed! (But you can specify a custom path with `"pca_components_path"` if desired)
 
 ## Validate the Optimization (Optional)
 
