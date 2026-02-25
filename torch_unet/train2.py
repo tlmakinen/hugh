@@ -258,24 +258,22 @@ def preprocess_data(x, y, target_device=None, pca_comps=None):
     
     # PCA cleaning (now GPU-friendly with pre-computed components!)
     # PCALayer input: (batch*split, freq, ra/split, baseline, Re/Im)
-    # PCALayer output: (batch*split, Re/Im, baseline, ra/split, freq) 
-    # [according to PCALayer line 121-122: permute (0, 4, 2, 1, 3)]
+    # PCALayer output: (batch*split, Re/Im, baseline, ra/split, freq) = (8, 2, 48, 256, 128)
     x = PCALayer(x, N_FG=N_FG, pca_components=pca_comps)
 
     # Scale data
     x.mul_(1e5)  # In-place multiplication
     y.mul_(1e5)
     
-    # Model expects input shape: (batch*split, Re/Im, ra/split, freq, baseline)
-    # x is currently: (batch*split, Re/Im, baseline, ra/split, freq)
-    # Permute x: (0, 1, 2, 3, 4) → (0, 1, 3, 4, 2)
-    x = x.permute(0, 1, 3, 4, 2)  # → (batch*split, Re/Im, ra/split, freq, baseline)
+    # Transform y to match x shape
+    # y before: (batch*split, freq, ra/split, baseline, Re/Im)
+    #           (0,          1,    2,        3,        4)
+    # y target: (batch*split, Re/Im, baseline, ra/split, freq)
+    #           (0,          4,     3,        2,        1)
+    # Permutation: (0, 4, 3, 2, 1)
+    y = y.permute(0, 4, 3, 2, 1)
     
-    # Transform y to match model output format:
-    # y is currently: (batch*split, freq, ra/split, baseline, Re/Im)
-    # Target format: (batch*split, Re/Im, ra/split, freq, baseline)
-    # Permute: (0, 1, 2, 3, 4) → (0, 4, 2, 1, 3)
-    y = y.permute(0, 4, 2, 1, 3)  # → (batch*split, Re/Im, ra/split, freq, baseline)
+    # Both x and y now: (batch*split, Re/Im, baseline, ra/split, freq) = (8, 2, 48, 256, 128)
     
     return x, y
     
