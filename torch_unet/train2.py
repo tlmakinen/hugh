@@ -1,3 +1,9 @@
+# --------------------------------------------------------------------------------------
+# CRITICAL: Set PyTorch CUDA memory allocation BEFORE importing torch!
+# This helps prevent "CUDA out of memory" errors during long training runs
+import os
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
+
 import h5py
 import helpers
 import numpy as np
@@ -11,21 +17,15 @@ import gc
 from accelerate import Accelerator
 
 import os.path as osp
-import os
 import argparse
 
 import cloudpickle as pickle
-import sys,os,json
+import sys,json
 
 from dataloader import *
 from nets import *
 
 from nets2_attn import *
-
-# --------------------------------------------------------------------------------------
-# Set PyTorch CUDA memory allocation settings to reduce fragmentation
-# This helps prevent "CUDA out of memory" errors during long training runs
-os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
 
 # --------------------------------------------------------------------------------------
 
@@ -212,7 +212,7 @@ val_gal_files = list(np.array(galfiles)[~galmask])
 
 def preprocess_data(x, y, target_device=None, pca_comps=None):
     """
-    Preprocess data for training. Now GPU-optimized!
+    Preprocess data for training. Memory-optimized version.
     
     Args:
         x: Input contaminated signal (complex)
@@ -222,40 +222,48 @@ def preprocess_data(x, y, target_device=None, pca_comps=None):
     """
     # Move to target device first if specified
     if target_device is not None:
-        x = x.to(target_device)
-        y = y.to(target_device)
+        x = x.to(target_device, non_blocking=True)
+        y = y.to(target_device, non_blocking=True)
     
-    # split ordering (batch, baseline, freq, ra) = (batch*split, 48, 128, 128)
-    # then transpose to (batch*split, freq, ra, baseline)
-    x = torch.permute(
-        torch.cat(torch.tensor_split(x, split, dim=3)),
-        (0, 3, 1, 2)
-    )
-    y = torch.permute(
-        torch.cat(torch.tensor_split(y, split, dim=3)),
-        (0, 3, 1, 2)
-    )
+    # Split and reshape more efficiently to reduce intermediate tensors
+    # Original shape: (batch, baseline, freq, ra) = (batch, 48, 128, 1024)
+    # Target shape: (batch*split, freq, ra/split, baseline)
     
-    # then finally get the real and im parts as channels
-    # shape: (batch*split, freq, ra, baseline, Re/Im)
+    batch_size = x.shape[0]
+    baseline_dim = x.shape[1]
+    freq_dim = x.shape[2]
+    ra_dim = x.shape[3]
+    ra_split_dim = ra_dim // split
+    
+    # Reshape to split RA dimension: (batch, baseline, freq, split, ra/split)
+    x = x.reshape(batch_size, baseline_dim, freq_dim, split, ra_split_dim)
+    y = y.reshape(batch_size, baseline_dim, freq_dim, split, ra_split_dim)
+    
+    # Permute to: (batch, split, freq, ra/split, baseline)
+    x = x.permute(0, 3, 2, 4, 1)
+    y = y.permute(0, 3, 2, 4, 1)
+    
+    # Merge batch and split: (batch*split, freq, ra/split, baseline)
+    x = x.reshape(batch_size * split, freq_dim, ra_split_dim, baseline_dim)
+    y = y.reshape(batch_size * split, freq_dim, ra_split_dim, baseline_dim)
+    
+    # Convert to real/imag: (batch*split, freq, ra/split, baseline, Re/Im)
     x = torch.stack([x.real, x.imag], dim=-1)
     y = torch.stack([y.real, y.imag], dim=-1)
 
-    # add white noise to the signal
+    # Add white noise
     if ADD_NOISE:
-        # Generate noise on same device
-        noise = torch.normal(mean=0.0, std=NOISEAMP, size=x.shape, 
-                           device=x.device, dtype=x.dtype)
-        x = x + noise
+        x.add_(torch.randn_like(x) * NOISEAMP)  # In-place addition
     
-    # pass x to the pca (now GPU-friendly with pre-computed components!)
+    # PCA cleaning (now GPU-friendly with pre-computed components!)
     x = PCALayer(x, N_FG=N_FG, pca_components=pca_comps)
 
-    x *= 1e5
-    y *= 1e5
+    # Scale data
+    x.mul_(1e5)  # In-place multiplication
+    y.mul_(1e5)
     
-    # get y into same shape as model outputs
-    y = torch.permute(y, (0, 4, 2, 1, 3))
+    # Get y into same shape as model outputs: (batch*split, Re/Im, baseline, ra/split, freq)
+    y = y.permute(0, 4, 3, 2, 1)
     
     return x, y
     
@@ -306,8 +314,12 @@ val_dataloader = DataLoader(
 print("INITIALISING MODEL")
     
 
-split = 1024 // 128 # 8 chunks per sky simulation
+# MEMORY OPTIMIZATION: Reduce split factor to lower memory usage
+# Original: split = 1024 // 128 = 8 (effective batch = 2 * 8 = 16 samples)
+# Reduced: split = 1024 // 256 = 4 (effective batch = 2 * 4 = 8 samples)
+split = 1024 // 256  # Reduce from 8 to 4 chunks per sky simulation
 
+# NOTE: If still OOM, try split = 1024 // 512 = 2
 
 #STEPS_PER_EPOCH = 100 # reshuffle data each time 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -315,7 +327,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 #block = BasicBlock(16, 32)
 
 act = smooth_leaky if ACTIVATION == "smooth_leaky" else nn.SiLU
-model = UNet3d(BasicBlock, filters=FILTERS, act=act).to(device)
+# Enable gradient checkpointing for memory savings (~40% less memory, ~20% slower)
+model = UNet3d(BasicBlock, filters=FILTERS, act=act, use_checkpoint=True).to(device)
 
 
 # SET TO BFLOAT16

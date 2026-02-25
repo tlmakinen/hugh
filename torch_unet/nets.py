@@ -154,19 +154,21 @@ class UNet3d(nn.Module):
     
 
     def __init__(self, block, filters=16,
-                 scaling=1e5, act=nn.LeakyReLU):
+                 scaling=1e5, act=nn.LeakyReLU, use_checkpoint=False):
         """initialise model. inherits from BasicBlock class above.
 
         Args:
             block (nn.Module): Basic Convolutional block
             filters (int, optional): Number of output filters. Defaults to 16.
             scaling (_type_, optional): _description_. Defaults to 1e5.
+            use_checkpoint (bool): Enable gradient checkpointing for memory savings
         """
         
         super(UNet3d,self).__init__()
         fs = filters
         self.act = act
         self.scaling = scaling
+        self.use_checkpoint = use_checkpoint
         self.layer1 = self._make_layer(block, 2, fs, blocks=2,stride=1,padding=(1,1,1))
         self.layer2 = self._make_layer(block,fs,fs*2, blocks=1,stride=2,padding=(1,1,1)) # (64,64,24)
         self.layer3 = self._make_layer(block,fs*2,fs*2,blocks=2,stride=1,padding=(1,1,1))
@@ -193,34 +195,36 @@ class UNet3d(nn.Module):
         fn = lambda x: PCALayer(x=x, N_FG=N_FG)
         return fn
 
-    def forward(self,x):
+    def forward(self, x):
+        from torch.utils.checkpoint import checkpoint
         
-        x1 = self.layer1(x)
-        #print("x1", x1.shape)
-        x  = self.layer2(x1)
-        #print("x", x.shape)
-        x2 = self.layer3(x)
-        #print("x2", x2.shape)
-        x  = self.layer4(x2)
-        #print("x layer 4", x.shape)
-        x  = self.layer5(x)
-        #print("x layer 5", x.shape)
-        x  = self.act(inplace=True)(self.deconv_batchnorm1((self.deconv1(x))))
-       # print("x up 1", x.shape)
-        x  = torch.cat((x,x2),dim=1)
-        #print("x cat 1", x.shape)
-        x  = self.layer6(x)
-        #print("x layer 6", x.shape)
-        x  = self.act(inplace=True)(self.deconv_batchnorm2((self.deconv2(x))))
-        #print("x up 2", x.shape)
+        # Encoder path (with optional checkpointing for memory savings)
+        if self.use_checkpoint and self.training:
+            x1 = checkpoint(self.layer1, x, use_reentrant=False)
+            x = checkpoint(self.layer2, x1, use_reentrant=False)
+            x2 = checkpoint(self.layer3, x, use_reentrant=False)
+            x = checkpoint(self.layer4, x2, use_reentrant=False)
+            x = checkpoint(self.layer5, x, use_reentrant=False)
+        else:
+            x1 = self.layer1(x)
+            x = self.layer2(x1)
+            x2 = self.layer3(x)
+            x = self.layer4(x2)
+            x = self.layer5(x)
         
-        x  = torch.cat((x[:, :, :, :], x1[:, :, :, :]),dim=1)
-        #print("x cat 2", x.shape)
-
-        x  = self.layer7(x)
-        x  = self.deconv4(x)
+        # Decoder path (don't checkpoint decoder - less memory intensive)
+        x = self.act(inplace=True)(self.deconv_batchnorm1(self.deconv1(x)))
+        x = torch.cat((x, x2), dim=1)
         
-        #x = torch.exp(x)
-        #x = x + minx - 1e3
-
+        if self.use_checkpoint and self.training:
+            x = checkpoint(self.layer6, x, use_reentrant=False)
+        else:
+            x = self.layer6(x)
+        
+        x = self.act(inplace=True)(self.deconv_batchnorm2(self.deconv2(x)))
+        x = torch.cat((x[:, :, :, :], x1[:, :, :, :]), dim=1)
+        
+        x = self.layer7(x)
+        x = self.deconv4(x)
+        
         return x
