@@ -1,0 +1,5 @@
+config: config_train2_fixedpca_v2.json
+checkpoint: /data101/makinen/hirax_sims/accelerator/train2_fixedpca_v2/pytorch_model_epoch38.bin
+cosmo_file: /data101/makinen/hirax_sims/cosmo_gaussian_pb/cosmo_H0_60p894_vis_1.h5
+gal_file: /data101/makinen/hirax_sims/more_baselines/galaxy_gaussian_pb/galaxy_md_vis_39.h5
+baseline: 9

@@ -1,0 +1,5 @@
+config: config_train2_v3_v100.json
+checkpoint: default
+cosmo_file: /data101/makinen/hirax_sims/cosmo_gaussian_pb/cosmo_H0_60p894_vis_1.h5
+gal_file: /data101/makinen/hirax_sims/more_baselines/galaxy_gaussian_pb/galaxy_md_vis_39.h5
+baseline: 40
