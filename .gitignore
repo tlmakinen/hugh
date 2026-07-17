@@ -1,2 +1,24 @@
 notebooks/*
 /*.ipynb
+
+# Jupyter noise
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# Python cache
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Training history artifacts
+*.pkl
+
+# Large data / model artifacts
+*.npy
+pca_components.pt
+torch_unet/pca_components.pt
+
+# Scratch
+foobar.json
+torch_unet/foobar.json
