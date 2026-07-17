@@ -1,0 +1,75 @@
+{
+  "_comment": "Recommended v3 default config. See SUGGESTIONS.md for what each knob does and config_train2_v3_full.json for the full surface area exposed to the CLI / JSON.",
+
+  "model_params": {
+    "model_version": "v2",
+
+    "filters": 32,
+    "noiseamp": 1.5e-7,
+    "n_fg": 11,
+
+    "model_path": "/data101/makinen/hirax_sims/accelerator/",
+    "model_dir": "/data101/makinen/hirax_sims/accelerator/",
+    "load_dir": "/data101/makinen/hirax_sims/accelerator/",
+    "model_name": "train2_v3_default",
+    "act": "smooth_leaky",
+    "loss": "logmse",
+
+    "pca_components_path": "/data101/makinen/hirax_sims/accelerator/train2_fixedpca_v2/pca_components_nfg11.pt",
+
+    "levels": 3,
+    "block": "preact_res",
+    "n_blocks_per_stage": 2,
+    "norm": "groupnorm",
+    "norm_groups": 8,
+    "activation": "silu",
+
+    "pad_modes": ["circular", "reflect", "replicate"],
+
+    "downsample_kind": "blurpool",
+    "upsample_kind": "resize_conv",
+    "strides": [[2, 2, 2], [2, 2, 2], [2, 2, 2]],
+
+    "two_conv_head": true,
+
+    "attention_gates": false,
+    "use_se": false,
+
+    "factored_convs": false,
+    "film_conditioning": false,
+    "film_cond_dim": 8,
+    "freq_pos_encoding": false,
+    "freq_pos_dim": 2
+  },
+
+  "training_params": {
+    "learning_rate": 2.0e-4,
+    "batch_size": 2,
+    "epochs": 120,
+    "gradient_clip": 1.0,
+    "early_stopping_patience": 20,
+    "early_stopping_min_delta": 0.0001,
+    "train_num_workers": 4,
+    "val_num_workers": 2,
+    "prefetch_factor": 2,
+    "mixed_precision": "bf16",
+    "use_compile": true,
+    "compile_mode": "default",
+    "use_grad_checkpoint": false,
+    "seed": 42,
+    "load_model": false,
+    "add_noise": true,
+    "cosmopath": "/data101/makinen/hirax_sims/cosmo_gaussian_pb/",
+    "galpath": "/data101/makinen/hirax_sims/more_baselines/galaxy_gaussian_pb/",
+    "num_train": 128,
+
+    "target_transform": "arcsinh",
+    "predict_residual": true,
+    "ra_shift_aug": true,
+    "optimizer": "adamw",
+    "weight_decay": 1.0e-4,
+    "lr_schedule": "onecycle",
+    "warmup_frac": 0.05,
+    "ema_decay": 0.999
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "model_params": {
+    "filters": 16,
+    "noiseamp": 1.5e-7,
+    "n_fg": 11,
+    "model_path": "/data101/makinen/hirax_sims/accelerator/",
+    "model_dir": "/data101/makinen/hirax_sims/accelerator/",
+    "load_dir": "/data101/makinen/hirax_sims/accelerator/",
+    "model_name": "train2_fixedpca_v2",
+    "act": "smooth_leaky",
+    "loss": "logmse"
+  },
+  "training_params": {
+    "learning_rate": 0.00015,
+    "batch_size": 6,
+    "epochs": 100,
+    "gradient_clip": 1.0,
+    "early_stopping_patience": 12,
+    "early_stopping_min_delta": 0.0001,
+    "train_num_workers": 4,
+    "val_num_workers": 2,
+    "prefetch_factor": 2,
+    "mixed_precision": "bf16",
+    "use_compile": true,
+    "compile_mode": "default",
+    "use_grad_checkpoint": false,
+    "seed": 42,
+    "load_model": false,
+    "add_noise": true,
+    "cosmopath": "/data101/makinen/hirax_sims/cosmo_gaussian_pb/",
+    "galpath": "/data101/makinen/hirax_sims/more_baselines/galaxy_gaussian_pb/",
+    "num_train": 128
+  },
+  "moment_2_params": {
+    "model_name": "moment_2",
+    "model_path": "/data101/makinen/hirax_sims/accelerator/",
+    "model_dir": "/data101/makinen/hirax_sims/accelerator/",
+    "load_dir": "/data101/makinen/hirax_sims/accelerator/"
+  }
+}
