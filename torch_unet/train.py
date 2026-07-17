@@ -1,8 +1,8 @@
 import h5py
-import helpers
 import numpy as np
 from pathlib import Path
 import torch
+import math
 from torch.utils import data
 from torch.utils.data.dataloader import default_collate
 
@@ -41,6 +41,22 @@ class logMSELoss(nn.Module):
         
     def forward(self, pred, actual):
         return torch.log(self.mse(pred, actual))
+
+
+
+def log_cosh_loss(y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
+    def _log_cosh(x: torch.Tensor) -> torch.Tensor:
+        return x + torch.nn.functional.softplus(-2. * x) - math.log(2.0)
+    return torch.mean(_log_cosh(y_pred - y_true))
+
+class LogCoshLoss(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(
+        self, y_pred: torch.Tensor, y_true: torch.Tensor
+    ) -> torch.Tensor:
+        return log_cosh_loss(y_pred, y_true)
 
 # --------------------------------------------------------------------------------------
 
@@ -236,13 +252,13 @@ split = 1024 // 128 # 8 chunks per sky simulation
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 #block = BasicBlock(16, 32)
-#model = UNet3d(BasicBlock, filters=FILTERS).to(device)
-model = UNet3DWithAttention(in_channels=2, out_channels=2, init_features=FILTERS)
+model = UNet3d(BasicBlock, filters=FILTERS).to(device)
+#model = UNet3DWithAttention(in_channels=2, out_channels=2, init_features=FILTERS)
 
 
 # start up the optimizer
 optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
-criterion = logMSELoss()
+criterion = LogCoshLoss() #logMSELoss()
 
 model_path = MODEL_PATH
 model_path += MODEL_NAME
@@ -324,8 +340,6 @@ def test(plot=False):
         y *= model.scaling # 
         x *= model.scaling
         
-        # model learns residual model(x) = x + y => y_pred = model(x) - x
-        preds = model(x) #- x.cpu()
         
         preds = model(x)
         loss = criterion(preds, y)
@@ -365,7 +379,6 @@ def test(plot=False):
     
 print("STARTING TRAINING LOOP")
 
-#MODEL_PATH = "/data101/makinen/hirax_sims/accelerator/"
 
 gc.collect()
 
@@ -400,7 +413,8 @@ for epoch in range(1, EPOCHS + 1):
     history["train_loss"].append(loss)
     history["val_loss"].append(val_loss)
 
-    save_obj(history, "train_history_inprog")
+    save_obj(history, MODEL_NAME + "_train_history_inprog") # save locally
+    save_obj(history, model_path + "train_history_inprog")
 
     # dump to save memory
     gc.collect()
@@ -410,8 +424,8 @@ for epoch in range(1, EPOCHS + 1):
 
 # save the history object
 save_obj(history, "train_history")
-
-
+save_obj(history, outdir_model + "train_history")
+save_obj(configs, outdir_model + "configs.json")
 
 
 # should we do the validation checks here ?
